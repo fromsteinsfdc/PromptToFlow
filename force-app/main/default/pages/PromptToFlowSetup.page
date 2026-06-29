@@ -1,0 +1,66 @@
+<apex:page controller="PromptToFlowBootstrapController"
+           action="{!init}"
+           title="PromptToFlow Setup"
+           showHeader="true"
+           sidebar="false"
+           docType="html-5.0"
+           lightningStylesheets="true">
+    <apex:slds />
+    <div class="slds-scope slds-p-around_large">
+        <div class="slds-text-heading_medium slds-m-bottom_medium">PromptToFlow Setup</div>
+
+        <apex:outputPanel rendered="{!isReady}" layout="block"
+            styleClass="slds-box slds-theme_success slds-m-bottom_medium">
+            PromptToFlow is fully configured. You can generate parsers from the builder.
+        </apex:outputPanel>
+
+        <apex:outputPanel rendered="{!NOT(isReady)}" layout="block"
+            styleClass="slds-box slds-theme_shade slds-m-bottom_medium">
+            <strong>Status:</strong>&nbsp;<apex:outputText value="{!statusMessage}" />
+        </apex:outputPanel>
+
+        <apex:form rendered="{!NOT(isReady)}">
+            <ol class="slds-list_ordered">
+                <li class="slds-m-bottom_medium">
+                    <div class="slds-m-bottom_x-small">
+                        Click <strong>Run Setup</strong>. This automatically creates the per-org OAuth
+                        client and wires the Auth Provider, External Credential, and Named Credential.
+                        No keys or secrets to copy.
+                    </div>
+                    <apex:commandButton value="Run Setup"
+                                        action="{!runSetup}"
+                                        styleClass="slds-button slds-button_brand"
+                                        status="ptfBusy" />
+                    <apex:actionStatus id="ptfBusy"
+                                       startText=" Working, this can take a few seconds..."
+                                       stopText="" />
+                    <apex:outputPanel rendered="{!setupRan}" layout="block" styleClass="slds-m-top_small">
+                        <apex:outputPanel rendered="{!setupSucceeded}" layout="block"
+                            styleClass="slds-text-color_success">
+                            <apex:outputText value="{!setupMessage}" />
+                        </apex:outputPanel>
+                        <apex:outputPanel rendered="{!NOT(setupSucceeded)}" layout="block"
+                            styleClass="slds-text-color_error">
+                            <apex:outputText value="{!setupMessage}" />
+                        </apex:outputPanel>
+                    </apex:outputPanel>
+                </li>
+                <li class="slds-m-bottom_medium">
+                    Open the External Credential, then click <strong>Authenticate</strong> on the
+                    <code>PromptToFlow_Principal</code> to complete the one-time OAuth handshake.
+                    <div class="slds-m-top_xx-small">
+                        <apex:outputLink value="{!externalCredentialUrl}" target="_blank">
+                            Open External Credentials
+                        </apex:outputLink>
+                    </div>
+                </li>
+            </ol>
+
+            <div class="slds-m-top_medium">
+                <apex:commandButton value="Re-check Status"
+                                    action="{!init}"
+                                    styleClass="slds-button slds-button_neutral" />
+            </div>
+        </apex:form>
+    </div>
+</apex:page>

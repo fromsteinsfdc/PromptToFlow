@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Deploy-only placeholder. An External Credential cannot deploy without an
+  AuthProvider parameter, but an AuthProvider's consumerSecret is immutable
+  after creation and cannot be the real per-org secret at package time.
+  The post-install Setup (PromptToFlowBootstrapController) creates a separate
+  AuthProvider (PromptToFlow_Tooling_Local) with the real key/secret and
+  repoints the External Credential to it. This placeholder is then unused.
+-->
+<AuthProvider xmlns="http://soap.sforce.com/2006/04/metadata">
+    <authorizeUrl>https://login.salesforce.com/services/oauth2/authorize</authorizeUrl>
+    <consumerKey>PromptToFlow_Placeholder_Key</consumerKey>
+    <consumerSecret>PromptToFlow_Placeholder_Secret</consumerSecret>
+    <defaultScopes>refresh_token api</defaultScopes>
+    <friendlyName>PromptToFlow Tooling</friendlyName>
+    <includeOrgIdInIdentifier>true</includeOrgIdInIdentifier>
+    <isPkceEnabled>false</isPkceEnabled>
+    <providerType>Salesforce</providerType>
+    <requireMfa>false</requireMfa>
+    <sendAccessTokenInHeader>false</sendAccessTokenInHeader>
+    <sendClientCredentialsInHeader>false</sendClientCredentialsInHeader>
+    <sendSecretInApis>true</sendSecretInApis>
+    <tokenUrl>https://login.salesforce.com/services/oauth2/token</tokenUrl>
+</AuthProvider>

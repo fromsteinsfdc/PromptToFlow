@@ -1,0 +1,160 @@
+<template>
+    <lightning-card title="JSON Template Builder" icon-name="utility:builder">
+        <div class="slds-p-around_medium">
+            <p class="slds-text-body_small slds-m-bottom_medium">
+                Build reusable JSON response configurations, save them, and optionally generate/update a parser invocable class on save.
+            </p>
+
+            <template if:true={showSetupBanner}>
+                <div class="slds-notify slds-notify_alert slds-theme_alert-texture slds-theme_warning slds-m-bottom_medium" role="alert">
+                    <span class="slds-assistive-text">warning</span>
+                    <h2>{setupMessage}</h2>
+                    <template if:true={canAutoAssignPermissionSet}>
+                        <div class="slds-m-top_x-small">
+                            <lightning-button
+                                variant="brand"
+                                label="Auto-assign setup permission set"
+                                onclick={handleAutoAssignPermissionSet}
+                            ></lightning-button>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <div class="slds-box slds-m-bottom_medium">
+                <div class="slds-grid slds-wrap slds-gutters slds-m-bottom_small">
+                    <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12">
+                        <lightning-combobox
+                            label="Saved Configuration"
+                            value={selectedConfigurationId}
+                            options={configurationOptions}
+                            placeholder="Select a saved config"
+                            onchange={handleConfigurationSelect}
+                        ></lightning-combobox>
+                    </div>
+                    <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12">
+                        <lightning-input
+                            label="Configuration Name"
+                            value={configurationName}
+                            onchange={handleConfigurationNameChange}
+                        ></lightning-input>
+                    </div>
+                </div>
+                <div class="slds-grid slds-wrap slds-gutters slds-m-bottom_small">
+                    <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12">
+                        <lightning-input
+                            label="Invocable Action Label"
+                            value={invocableActionLabel}
+                            onchange={handleInvocableActionLabelChange}
+                        ></lightning-input>
+                    </div>
+                    <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12">
+                        <lightning-input
+                            label="Apex Class Name (auto-derived, locked after first save)"
+                            value={derivedParserClassName}
+                            disabled
+                        ></lightning-input>
+                    </div>
+                </div>
+                <div class="slds-grid slds-wrap slds-gutters slds-m-bottom_small">
+                    <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12 slds-align-bottom">
+                        <lightning-input
+                            type="checkbox"
+                            label="Generate/Update parser class on save"
+                            checked={generateParserOnSave}
+                            onchange={handleGenerateParserToggle}
+                        ></lightning-input>
+                    </div>
+                </div>
+                <div class="slds-grid slds-grid_vertical-align-center">
+                    <lightning-button label="New" onclick={handleNewConfiguration} disabled={isSaving}></lightning-button>
+                    <lightning-button class="slds-m-left_small" variant="brand" label="Save Configuration" onclick={handleSaveConfiguration} disabled={isSaving}></lightning-button>
+                    <template if:true={isSaving}>
+                        <div class="slds-is-relative slds-m-left_small slds-p-left_large">
+                            <lightning-spinner size="small" variant="brand" alternative-text="Saving configuration"></lightning-spinner>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <div class="slds-grid slds-wrap slds-gutters slds-m-bottom_medium">
+                <div class="slds-col slds-size_1-of-1 slds-large-size_8-of-12">
+                    <lightning-combobox
+                        label="Object"
+                        value={objectToAdd}
+                        options={objectOptions}
+                        onchange={handleObjectChange}
+                        placeholder="Select an object"
+                    ></lightning-combobox>
+                </div>
+                <div class="slds-col slds-size_1-of-1 slds-large-size_4-of-12 slds-align-bottom">
+                    <lightning-button
+                        variant="brand"
+                        label="Add Object"
+                        onclick={handleAddObject}
+                        disabled={disableAddObject}
+                    ></lightning-button>
+                </div>
+            </div>
+
+            <template if:true={hasSelectedObjects}>
+                <template for:each={selectedObjects} for:item="objectConfig">
+                    <section key={objectConfig.id} class="slds-box slds-m-bottom_medium">
+                        <div class="slds-grid slds-wrap slds-grid_align-spread slds-grid_vertical-align-center slds-m-bottom_small">
+                            <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12">
+                                <h3 class="slds-text-heading_small">
+                                    {objectConfig.label}
+                                    <span class="slds-text-color_weak">({objectConfig.apiName})</span>
+                                </h3>
+                            </div>
+                            <div class="slds-col slds-size_1-of-1 slds-large-size_6-of-12 slds-text-align_right">
+                                <lightning-input
+                                    type="checkbox"
+                                    label="Collection (array)"
+                                    data-id={objectConfig.id}
+                                    checked={objectConfig.isCollection}
+                                    onchange={handleCollectionToggle}
+                                    class="slds-m-right_small"
+                                ></lightning-input>
+                                <lightning-button
+                                    variant="destructive-text"
+                                    label="Remove"
+                                    data-id={objectConfig.id}
+                                    onclick={handleRemoveObject}
+                                ></lightning-button>
+                            </div>
+                        </div>
+
+                        <template if:true={objectConfig.isLoading}>
+                            <lightning-spinner size="small" alternative-text="Loading fields"></lightning-spinner>
+                        </template>
+                        <template if:false={objectConfig.isLoading}>
+                            <lightning-dual-listbox
+                                name="fields"
+                                label="Fields"
+                                source-label="Available"
+                                selected-label="Selected"
+                                options={objectConfig.fieldOptions}
+                                value={objectConfig.selectedFields}
+                                data-id={objectConfig.id}
+                                onchange={handleFieldSelection}
+                            ></lightning-dual-listbox>
+                        </template>
+                    </section>
+                </template>
+
+                <div class="slds-m-bottom_small">
+                    <lightning-button variant="brand" label="Generate JSON Template" onclick={handleGenerateTemplate}></lightning-button>
+                    <lightning-button class="slds-m-left_small" label="Copy Output" onclick={handleCopyOutput}></lightning-button>
+                </div>
+
+                <lightning-textarea
+                    label="Generated JSON"
+                    value={jsonOutput}
+                    readonly
+                    class="slds-m-top_small"
+                ></lightning-textarea>
+            </template>
+        </div>
+    </lightning-card>
+</template>

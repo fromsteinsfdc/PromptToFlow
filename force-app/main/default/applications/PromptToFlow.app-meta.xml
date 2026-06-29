@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomApplication xmlns="http://soap.sforce.com/2006/04/metadata">
+    <brand>
+        <headerColor>#0070D2</headerColor>
+    </brand>
+    <formFactors>Large</formFactors>
+    <isNavAutoTempTabsDisabled>false</isNavAutoTempTabsDisabled>
+    <isNavPersonalizationDisabled>false</isNavPersonalizationDisabled>
+    <label>PromptToFlow</label>
+    <navType>Standard</navType>
+    <tabs>PromptToFlow_Builder</tabs>
+    <tabs>PromptToFlow_Setup</tabs>
+    <uiType>Lightning</uiType>
+</CustomApplication>

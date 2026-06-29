@@ -1,0 +1,20 @@
+{
+  "packageDirectories": [
+    {
+      "versionName": "ver 0.1",
+      "versionNumber": "0.1.0.NEXT",
+      "path": "force-app",
+      "default": true,
+      "package": "PromptToFlow",
+      "versionDescription": "PromptToFlow - JSON template to Flow parser generator"
+    }
+  ],
+  "name": "PromptToFlow",
+  "namespace": "",
+  "sfdcLoginUrl": "https://login.salesforce.com",
+  "sourceApiVersion": "66.0",
+  "packageAliases": {
+    "PromptToFlow": "0Hofj00000024xBCAQ",
+    "PromptToFlow@0.1.0-1": "04tfj000000LgaXAAS"
+  }
+}

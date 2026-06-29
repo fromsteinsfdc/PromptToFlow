@@ -1,0 +1,34 @@
+# List files or directories below to ignore them when running force:source:push, force:source:pull, and force:source:status
+# More information: https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_exclude_source.htm
+#
+
+package.xml
+
+# LWC configuration files
+**/jsconfig.json
+**/.eslintrc.json
+
+# LWC Jest
+**/__tests__/**
+
+node_modules/
+
+# Demo-only artifacts tied to the originating customer sandbox schema (pse__/PSA, Decision__c, Meetings__c, Issue__c).
+# Not part of the core PromptToFlow tool; excluded from deploy + packaging.
+**/classes/FlowJsonToProjectRecordsAction.cls
+**/classes/FlowJsonToProjectRecordsAction.cls-meta.xml
+**/classes/FlowJsonToProjectRecordsActionTest.cls
+**/classes/FlowJsonToProjectRecordsActionTest.cls-meta.xml
+**/classes/RiskADT.cls
+**/classes/RiskADT.cls-meta.xml
+**/classes/IssueADT.cls
+**/classes/IssueADT.cls-meta.xml
+**/classes/DecisionADT.cls
+**/classes/DecisionADT.cls-meta.xml
+
+# Build-org-specific Home page customization (references reports/LWC that don't exist in subscriber orgs).
+# Not part of the core PromptToFlow tool; excluded from deploy + packaging.
+**/flexipages/Sales_Home.flexipage-meta.xml
+
+# Legacy Connected App approach, replaced by External Client App (ECA). Kept out of source.
+**/connectedApps/**
