@@ -46,6 +46,7 @@ private class PromptToFlowControllerTest {
             }
         });
 
+        Test.setMock(HttpCalloutMock.class, new ToolingApiMock());
         Test.startTest();
         PromptToFlowController.ConfigurationRecordDto saved = PromptToFlowController.saveConfiguration(
             null,
@@ -99,6 +100,7 @@ private class PromptToFlowControllerTest {
             }
         });
 
+        Test.setMock(HttpCalloutMock.class, new ToolingApiMock());
         Test.startTest();
         PromptToFlowController.ConfigurationRecordDto saved = PromptToFlowController.saveConfiguration(
             null,
@@ -125,6 +127,7 @@ private class PromptToFlowControllerTest {
             }
         });
 
+        Test.setMock(HttpCalloutMock.class, new ToolingApiMock());
         PromptToFlowController.ConfigurationRecordDto firstSave = PromptToFlowController.saveConfiguration(
             null,
             'Update Lock Config',

@@ -348,9 +348,9 @@ public with sharing class PromptToFlowController {
                     '        public List<' + config.apiName + '> ' + variableName + ' = new List<' + config.apiName + '>();'
                 );
                 parseBlocks.add(
-                    '                for (Object item : asList(payload.get(\'' + config.apiName + '\'))) {\n' +
+                    '                for (Object item : PromptToFlowParserRuntime.asList(payload.get(\'' + config.apiName + '\'))) {\n' +
                     '                    ' + config.apiName + ' recordItem = new ' + config.apiName + '();\n' +
-                    '                    populateFromMap(recordItem, asMap(item), ' + fieldSetLiteral + ');\n' +
+                    '                    PromptToFlowParserRuntime.populateFromMap(recordItem, PromptToFlowParserRuntime.asMap(item), ' + fieldSetLiteral + ');\n' +
                     '                    responseItem.' + variableName + '.add(recordItem);\n' +
                     '                }'
                 );
@@ -360,10 +360,10 @@ public with sharing class PromptToFlowController {
                     '        public ' + config.apiName + ' ' + variableName + ';'
                 );
                 parseBlocks.add(
-                    '                Map<String, Object> ' + variableName + 'Values = asMap(payload.get(\'' + config.apiName + '\'));\n' +
+                    '                Map<String, Object> ' + variableName + 'Values = PromptToFlowParserRuntime.asMap(payload.get(\'' + config.apiName + '\'));\n' +
                     '                if (!' + variableName + 'Values.isEmpty()) {\n' +
                     '                    ' + config.apiName + ' recordItem = new ' + config.apiName + '();\n' +
-                    '                    populateFromMap(recordItem, ' + variableName + 'Values, ' + fieldSetLiteral + ');\n' +
+                    '                    PromptToFlowParserRuntime.populateFromMap(recordItem, ' + variableName + 'Values, ' + fieldSetLiteral + ');\n' +
                     '                    responseItem.' + variableName + ' = recordItem;\n' +
                     '                }'
                 );
@@ -397,7 +397,7 @@ public with sharing class PromptToFlowController {
             '            Response responseItem = new Response();\n' +
             '            responseItem.success = true;\n' +
             '            try {\n' +
-            '                Map<String, Object> payload = asMap(JSON.deserializeUntyped(requestItem.jsonPayload));\n\n' +
+            '                Map<String, Object> payload = PromptToFlowParserRuntime.asMap(JSON.deserializeUntyped(requestItem.jsonPayload));\n\n' +
             parseBlock + '\n' +
             '            } catch (Exception e) {\n' +
             '                responseItem.success = false;\n' +
@@ -406,64 +406,6 @@ public with sharing class PromptToFlowController {
             '            results.add(responseItem);\n' +
             '        }\n\n' +
             '        return results;\n' +
-            '    }\n\n' +
-            '    private static Map<String, Object> asMap(Object value) {\n' +
-            '        if (value == null) {\n' +
-            '            return new Map<String, Object>();\n' +
-            '        }\n' +
-            '        if (value instanceof Map<String, Object>) {\n' +
-            '            return (Map<String, Object>) value;\n' +
-            '        }\n' +
-            '        throw new TypeException(\'Expected a JSON object.\');\n' +
-            '    }\n\n' +
-            '    private static List<Object> asList(Object value) {\n' +
-            '        if (value == null) {\n' +
-            '            return new List<Object>();\n' +
-            '        }\n' +
-            '        if (value instanceof List<Object>) {\n' +
-            '            return (List<Object>) value;\n' +
-            '        }\n' +
-            '        throw new TypeException(\'Expected a JSON array.\');\n' +
-            '    }\n\n' +
-            '    private static void populateFromMap(SObject targetRecord, Map<String, Object> values, Set<String> allowedFields) {\n' +
-            '        if (targetRecord == null || values == null || values.isEmpty()) {\n' +
-            '            return;\n' +
-            '        }\n\n' +
-            '        Map<String, Schema.SObjectField> fieldMap = targetRecord.getSObjectType().getDescribe().fields.getMap();\n' +
-            '        for (String fieldApiName : values.keySet()) {\n' +
-            '            if (!allowedFields.contains(fieldApiName)) {\n' +
-            '                continue;\n' +
-            '            }\n' +
-            '            Schema.SObjectField fieldToken = fieldMap.get(fieldApiName);\n' +
-            '            if (fieldToken == null) {\n' +
-            '                continue;\n' +
-            '            }\n' +
-            '            Schema.DescribeFieldResult fieldDescribe = fieldToken.getDescribe();\n' +
-            '            if (!(fieldDescribe.isCreateable() || fieldDescribe.isUpdateable())) {\n' +
-            '                continue;\n' +
-            '            }\n' +
-            '            targetRecord.put(fieldApiName, coerceFieldValue(values.get(fieldApiName), fieldDescribe.getType()));\n' +
-            '        }\n' +
-            '    }\n\n' +
-            '    private static Object coerceFieldValue(Object value, Schema.DisplayType fieldType) {\n' +
-            '        if (value == null) {\n' +
-            '            return null;\n' +
-            '        }\n' +
-            '        String stringValue = String.valueOf(value);\n' +
-            '        if (String.isBlank(stringValue)) {\n' +
-            '            return null;\n' +
-            '        }\n' +
-            '        switch on fieldType {\n' +
-            '            when DATE { return Date.valueOf(stringValue); }\n' +
-            '            when DATETIME { return (Datetime) JSON.deserialize(\'"\' + stringValue + \'"\', Datetime.class); }\n' +
-            '            when TIME { return (Time) JSON.deserialize(\'"\' + stringValue + \'"\', Time.class); }\n' +
-            '            when DOUBLE, CURRENCY, PERCENT { return Decimal.valueOf(stringValue); }\n' +
-            '            when INTEGER { return Integer.valueOf(stringValue); }\n' +
-            '            when LONG { return Long.valueOf(stringValue); }\n' +
-            '            when BOOLEAN { return stringValue.toLowerCase() == \'true\'; }\n' +
-            '            when REFERENCE, ID { return (Id) stringValue; }\n' +
-            '            when else { return stringValue; }\n' +
-            '        }\n' +
             '    }\n' +
             '}';
     }
