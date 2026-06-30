@@ -156,8 +156,20 @@
                                             </template>
                                             <span class="slds-truncate" title={navItem.shortLabel}>{navItem.shortLabel}</span>
                                         </span>
-                                        <template if:true={navItem.isConfigured}>
-                                            <span class="slds-badge slds-col_bump-left">{navItem.selectedCount}</span>
+                                        <template if:true={navItem.showError}>
+                                            <lightning-icon
+                                                icon-name="utility:error"
+                                                variant="error"
+                                                size="xx-small"
+                                                alternative-text="This object is incomplete"
+                                                title="Select an object and at least one field"
+                                                class="slds-col_bump-left"
+                                            ></lightning-icon>
+                                        </template>
+                                        <template if:false={navItem.showError}>
+                                            <template if:true={navItem.isConfigured}>
+                                                <span class="slds-badge slds-col_bump-left">{navItem.selectedCount}</span>
+                                            </template>
                                         </template>
                                     </a>
                                 </li>

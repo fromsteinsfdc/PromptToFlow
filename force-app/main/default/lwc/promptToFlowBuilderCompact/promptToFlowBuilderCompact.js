@@ -69,6 +69,7 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             shortLabel: item.shortLabel,
             selectedCount: item.selectedCount,
             isConfigured: item.isConfigured,
+            showError: item.showError === true,
             iconName: item.isCollection ? 'utility:record_collection' : 'utility:record_alt',
             iconAlt: item.isCollection ? 'Collection' : 'Single record',
             ariaSelected: item.id === this.activeTab ? 'true' : 'false',
@@ -76,6 +77,34 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
                 item.id === this.activeTab
                     ? 'slds-vertical-tabs__nav-item slds-is-active'
                     : 'slds-vertical-tabs__nav-item'
+        }));
+    }
+
+    isObjectInvalid(objectConfig) {
+        if (!objectConfig) {
+            return false;
+        }
+        if (!objectConfig.apiName) {
+            return true;
+        }
+        return (objectConfig.selectedFields || []).length === 0;
+    }
+
+    // Flags the given tab with an error dot when it's left in an invalid state.
+    flagTabIfInvalid(objectId) {
+        if (!objectId) {
+            return;
+        }
+        const objectConfig = this.selectedObjects.find((item) => item.id === objectId);
+        if (objectConfig) {
+            this.updateObjectConfig(objectId, { showError: this.isObjectInvalid(objectConfig) });
+        }
+    }
+
+    flagInvalidTabs() {
+        this.selectedObjects = this.selectedObjects.map((item) => ({
+            ...item,
+            showError: this.isObjectInvalid(item)
         }));
     }
 
@@ -335,11 +364,29 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             this.showToast('Validation', 'Invocable action label is required.', 'warning');
             return;
         }
-        const configurationModel = this.exportConfigurationModel();
-        if (configurationModel.length === 0) {
-            this.showToast('Validation', 'Add and select at least one object before saving.', 'warning');
+        if (this.selectedObjects.length === 0) {
+            this.showToast('Validation', 'Add at least one object before saving.', 'warning');
             return;
         }
+
+        const unconfigured = this.selectedObjects.filter((item) => !item.apiName);
+        const missingFields = this.selectedObjects.filter(
+            (item) => item.apiName && (item.selectedFields || []).length === 0
+        );
+        if (unconfigured.length || missingFields.length) {
+            this.flagInvalidTabs();
+            const firstInvalid = this.selectedObjects.find((item) => this.isObjectInvalid(item));
+            if (firstInvalid) {
+                this.activeTab = firstInvalid.id;
+            }
+            const message = unconfigured.length
+                ? 'Select an object for every tab, or remove empty “New object” tabs before saving.'
+                : 'Each object must have at least one field selected.';
+            this.showToast('Validation', message, 'warning');
+            return;
+        }
+
+        const configurationModel = this.exportConfigurationModel();
 
         this.isSaving = true;
         try {
@@ -426,8 +473,10 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             fieldOptions: [],
             selectedFields: [],
             selectedCount: 0,
-            searchTerm: ''
+            searchTerm: '',
+            showError: false
         };
+        this.flagTabIfInvalid(this.activeTab);
         this.selectedObjects = [...this.selectedObjects, newObject];
         this.activeTab = id;
         this.isDirty = true;
@@ -435,7 +484,11 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
 
     handleSelectTab(event) {
         event.preventDefault();
-        this.activeTab = event.currentTarget.dataset.id;
+        const newId = event.currentTarget.dataset.id;
+        if (newId !== this.activeTab) {
+            this.flagTabIfInvalid(this.activeTab);
+        }
+        this.activeTab = newId;
     }
 
     async handleObjectPicked(event) {
@@ -458,7 +511,8 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             shortLabel: this.shortLabel(label),
             pluralLabel: (objectOption && objectOption.pluralLabel) || apiName,
             isConfigured: true,
-            isLoading: true
+            isLoading: true,
+            showError: false
         });
 
         try {
@@ -495,7 +549,7 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
     handleFieldSelection(event) {
         const id = event.target.dataset.id;
         const value = event.detail.value;
-        this.updateObjectConfig(id, { selectedFields: value, selectedCount: value.length });
+        this.updateObjectConfig(id, { selectedFields: value, selectedCount: value.length, showError: false });
         this.isDirty = true;
         this.handleGenerateTemplate();
     }
