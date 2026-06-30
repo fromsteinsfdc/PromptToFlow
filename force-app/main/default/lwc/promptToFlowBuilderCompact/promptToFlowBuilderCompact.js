@@ -67,6 +67,23 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
         return this.selectedObjects.find((item) => item.id === this.activeTab);
     }
 
+    // Filters only the Available side by the search term; selected fields
+    // always stay in the options so the Selected side remains fully visible.
+    get activeFieldOptions() {
+        const obj = this.activeObject;
+        if (!obj) {
+            return [];
+        }
+        const term = (obj.searchTerm || '').trim().toLowerCase();
+        if (!term) {
+            return obj.fieldOptions;
+        }
+        const selected = new Set(obj.selectedFields);
+        return obj.fieldOptions.filter(
+            (option) => selected.has(option.value) || option.label.toLowerCase().includes(term)
+        );
+    }
+
     get availableObjectOptions() {
         const used = new Set(this.selectedObjects.filter((item) => item.apiName).map((item) => item.apiName));
         return this.objectOptions.filter((option) => !used.has(option.value));
@@ -141,7 +158,8 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             this.objectOptions = objects
                 .map((item) => ({
                     label: `${item.label} (${item.apiName})`,
-                    value: item.apiName
+                    value: item.apiName,
+                    pluralLabel: item.pluralLabel
                 }))
                 .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
         } catch (error) {
@@ -221,12 +239,14 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
                     apiName: rawConfig.apiName,
                     label: option ? option.label : rawConfig.apiName,
                     shortLabel: this.shortLabel(option ? option.label : rawConfig.apiName),
+                    pluralLabel: (option && option.pluralLabel) || rawConfig.pluralLabel || rawConfig.apiName,
                     isConfigured: true,
                     isCollection: rawConfig.isCollection !== false,
                     isLoading: false,
                     fieldOptions: this.mapFields(fields),
                     selectedFields,
-                    selectedCount: selectedFields.length
+                    selectedCount: selectedFields.length,
+                    searchTerm: ''
                 };
             })
         );
@@ -360,9 +380,20 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             .filter((item) => item.apiName)
             .map((item) => ({
                 apiName: item.apiName,
+                jsonKey: this.getJsonKey(item),
                 isCollection: item.isCollection,
                 selectedFields: [...item.selectedFields]
             }));
+    }
+
+    // Collections use the object's plural label as the JSON key; single
+    // records use the API name. The template preview and the generated
+    // parser read these same keys, so both must stay in sync.
+    getJsonKey(objectConfig) {
+        if (objectConfig.isCollection) {
+            return objectConfig.pluralLabel || objectConfig.apiName;
+        }
+        return objectConfig.apiName;
     }
 
     async handleAutoAssignPermissionSet() {
@@ -391,7 +422,8 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             isLoading: false,
             fieldOptions: [],
             selectedFields: [],
-            selectedCount: 0
+            selectedCount: 0,
+            searchTerm: ''
         };
         this.selectedObjects = [...this.selectedObjects, newObject];
         this.activeTab = id;
@@ -421,6 +453,7 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             apiName,
             label,
             shortLabel: this.shortLabel(label),
+            pluralLabel: (objectOption && objectOption.pluralLabel) || apiName,
             isConfigured: true,
             isLoading: true
         });
@@ -464,6 +497,11 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
         this.handleGenerateTemplate();
     }
 
+    handleFieldSearch(event) {
+        const id = event.target.dataset.id;
+        this.updateObjectConfig(id, { searchTerm: event.target.value });
+    }
+
     handleGenerateTemplate() {
         this.jsonOutput = this.buildTemplateJson();
     }
@@ -486,7 +524,7 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
                 const field = objectConfig.fieldOptions.find((option) => option.value === fieldApiName);
                 selectedFieldMap[fieldApiName] = this.getPlaceholderValue(field);
             });
-            template[objectConfig.apiName] = objectConfig.isCollection ? [selectedFieldMap] : selectedFieldMap;
+            template[this.getJsonKey(objectConfig)] = objectConfig.isCollection ? [selectedFieldMap] : selectedFieldMap;
         });
         return JSON.stringify(template, null, 2);
     }

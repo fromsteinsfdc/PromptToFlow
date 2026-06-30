@@ -234,12 +234,22 @@
                                 <lightning-spinner size="small" alternative-text="Loading fields"></lightning-spinner>
                             </template>
                             <template if:false={activeObject.isLoading}>
+                                <lightning-input
+                                    type="search"
+                                    label="Filter fields"
+                                    variant="label-hidden"
+                                    placeholder="Filter available fields…"
+                                    value={activeObject.searchTerm}
+                                    data-id={activeObject.id}
+                                    onchange={handleFieldSearch}
+                                    class="slds-m-bottom_x-small"
+                                ></lightning-input>
                                 <lightning-dual-listbox
                                     name="fields"
                                     label="Fields"
                                     source-label="Available"
                                     selected-label="Selected"
-                                    options={activeObject.fieldOptions}
+                                    options={activeFieldOptions}
                                     value={activeObject.selectedFields}
                                     data-id={activeObject.id}
                                     onchange={handleFieldSelection}
