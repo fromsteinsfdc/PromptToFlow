@@ -18,6 +18,78 @@ private class PromptToFlowControllerTest {
         }
     }
 
+    private class ToolingUpdateMock implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HttpResponse response = new HttpResponse();
+            response.setStatusCode(200);
+            String endpoint = req.getEndpoint();
+            String method = req.getMethod();
+
+            if (endpoint.contains('/tooling/query')) {
+                response.setBody('{"totalSize":1,"records":[{"Id":"01p000000000001AAA"}]}');
+            } else if (method == 'POST' && endpoint.contains('/sobjects/MetadataContainer')) {
+                response.setStatusCode(201);
+                response.setBody('{"id":"1dc000000000001AAA","success":true}');
+            } else if (method == 'POST' && endpoint.contains('/sobjects/ApexClassMember')) {
+                response.setStatusCode(201);
+                response.setBody('{"id":"400000000000001AAA","success":true}');
+            } else if (method == 'POST' && endpoint.contains('/sobjects/ContainerAsyncRequest')) {
+                response.setStatusCode(201);
+                response.setBody('{"id":"1dr000000000001AAA","success":true}');
+            } else if (method == 'GET' && endpoint.contains('/sobjects/ContainerAsyncRequest/')) {
+                response.setBody('{"State":"Completed"}');
+            } else if (method == 'DELETE') {
+                response.setStatusCode(204);
+            } else {
+                response.setBody('{"id":"01p000000000001AAA","success":true}');
+            }
+            return response;
+        }
+    }
+
+    private class ToolingCompileFailMock implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HttpResponse response = new HttpResponse();
+            response.setStatusCode(200);
+            String endpoint = req.getEndpoint();
+            String method = req.getMethod();
+
+            if (endpoint.contains('/tooling/query')) {
+                response.setBody('{"totalSize":1,"records":[{"Id":"01p000000000001AAA"}]}');
+            } else if (method == 'POST' && endpoint.contains('/sobjects/MetadataContainer')) {
+                response.setStatusCode(201);
+                response.setBody('{"id":"1dc000000000001AAA"}');
+            } else if (method == 'POST' && endpoint.contains('/sobjects/ApexClassMember')) {
+                response.setStatusCode(201);
+                response.setBody('{"id":"400000000000001AAA"}');
+            } else if (method == 'POST' && endpoint.contains('/sobjects/ContainerAsyncRequest')) {
+                response.setStatusCode(201);
+                response.setBody('{"id":"1dr000000000001AAA"}');
+            } else if (method == 'GET' && endpoint.contains('/sobjects/ContainerAsyncRequest/')) {
+                response.setBody('{"State":"Failed","DeployDetails":{"componentFailures":[{"problem":"Unexpected token"}]}}');
+            } else if (method == 'DELETE') {
+                response.setStatusCode(204);
+            } else {
+                response.setBody('{"id":"01p000000000001AAA"}');
+            }
+            return response;
+        }
+    }
+
+    private class ToolingCreate401Mock implements HttpCalloutMock {
+        public HTTPResponse respond(HTTPRequest req) {
+            HttpResponse response = new HttpResponse();
+            if (req.getEndpoint().contains('/tooling/query')) {
+                response.setStatusCode(200);
+                response.setBody('{"totalSize":0,"records":[]}');
+            } else {
+                response.setStatusCode(401);
+                response.setBody('[{"message":"Session expired or invalid","errorCode":"INVALID_SESSION_ID"}]');
+            }
+            return response;
+        }
+    }
+
     @IsTest
     static void getAvailableObjects_returnsRows() {
         Test.startTest();
@@ -115,6 +187,70 @@ private class PromptToFlowControllerTest {
         System.assertNotEquals(null, saved.id);
         System.assertEquals('Generated_Parser_From_Config', saved.parserClassName);
         System.assertEquals(true, saved.generateParserOnSave);
+    }
+
+    @IsTest
+    static void generateParserForConfiguration_updatesExistingClassViaContainer() {
+        PromptToFlow_Config__c cfg = new PromptToFlow_Config__c(
+            Name = 'Update Parser Config',
+            Configuration_JSON__c = '[{"apiName":"Account","isCollection":true,"selectedFields":["Name"]}]',
+            Parser_Class_Name__c = 'PTF_ExistingParser',
+            Invocable_Action_Label__c = 'PTF Existing Parser'
+        );
+        insert cfg;
+
+        Test.setMock(HttpCalloutMock.class, new ToolingUpdateMock());
+        Test.startTest();
+        PromptToFlowController.generateParserForConfiguration(cfg.Id);
+        Test.stopTest();
+
+        System.assert(true, 'Update via metadata container should complete without error.');
+    }
+
+    @IsTest
+    static void generateParserForConfiguration_compileFailureSurfacesError() {
+        PromptToFlow_Config__c cfg = new PromptToFlow_Config__c(
+            Name = 'Compile Fail Config',
+            Configuration_JSON__c = '[{"apiName":"Account","isCollection":true,"selectedFields":["Name"]}]',
+            Parser_Class_Name__c = 'PTF_CompileFailParser',
+            Invocable_Action_Label__c = 'PTF Compile Fail Parser'
+        );
+        insert cfg;
+
+        Test.setMock(HttpCalloutMock.class, new ToolingCompileFailMock());
+        Boolean threw = false;
+        Test.startTest();
+        try {
+            PromptToFlowController.generateParserForConfiguration(cfg.Id);
+        } catch (Exception e) {
+            threw = true;
+        }
+        Test.stopTest();
+
+        System.assertEquals(true, threw, 'A failed compile should surface an error.');
+    }
+
+    @IsTest
+    static void generateParserForConfiguration_writeError401Surfaces() {
+        PromptToFlow_Config__c cfg = new PromptToFlow_Config__c(
+            Name = 'Write 401 Config',
+            Configuration_JSON__c = '[{"apiName":"Account","isCollection":true,"selectedFields":["Name"]}]',
+            Parser_Class_Name__c = 'PTF_Write401Parser',
+            Invocable_Action_Label__c = 'PTF Write 401 Parser'
+        );
+        insert cfg;
+
+        Test.setMock(HttpCalloutMock.class, new ToolingCreate401Mock());
+        Boolean threw = false;
+        Test.startTest();
+        try {
+            PromptToFlowController.generateParserForConfiguration(cfg.Id);
+        } catch (Exception e) {
+            threw = true;
+        }
+        Test.stopTest();
+
+        System.assertEquals(true, threw, 'A 401 from the Tooling API should surface an error.');
     }
 
     @IsTest

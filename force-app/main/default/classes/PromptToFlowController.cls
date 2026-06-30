@@ -488,33 +488,159 @@ public with sharing class PromptToFlowController {
 
     private static void upsertApexClass(String className, String classBody) {
         String existingClassId = findApexClassIdByName(className);
-
-        HttpRequest request = new HttpRequest();
-        request.setHeader('Content-Type', 'application/json');
-
         if (existingClassId == null) {
-            request.setMethod('POST');
-            request.setEndpoint(getToolingApiBaseUrl() + '/sobjects/ApexClass');
-            request.setBody(JSON.serialize(new Map<String, Object>{ 'Name' => className, 'Body' => classBody }));
+            createApexClass(className, classBody);
         } else {
-            request.setMethod('PATCH');
-            request.setEndpoint(getToolingApiBaseUrl() + '/sobjects/ApexClass/' + existingClassId);
-            request.setBody(JSON.serialize(new Map<String, Object>{ 'Body' => classBody }));
+            // The Tooling API does not allow a direct PATCH on an existing
+            // ApexClass (it returns INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY).
+            // Updates must go through a MetadataContainer compile request.
+            updateApexClassViaContainer(existingClassId, classBody);
         }
+    }
 
-        HttpResponse response = new Http().send(request);
+    private static void createApexClass(String className, String classBody) {
+        HttpResponse response = sendTooling(
+            'POST',
+            '/sobjects/ApexClass',
+            JSON.serialize(new Map<String, Object>{ 'Name' => className, 'Body' => classBody })
+        );
         if (response.getStatusCode() >= 300) {
-            if (response.getStatusCode() == 401) {
-                throw new AuraHandledException(
-                    'Tooling API authentication failed from Named Credential (401). ' +
-                    'Configure Named Credential "' + TOOLING_NAMED_CREDENTIAL + '" with valid Salesforce OAuth access.'
-                );
+            throwApexWriteError(response);
+        }
+    }
+
+    private static void updateApexClassViaContainer(String existingClassId, String classBody) {
+        String containerId;
+        try {
+            containerId = createMetadataContainer();
+            createApexClassMember(containerId, existingClassId, classBody);
+            awaitContainerCompile(createContainerAsyncRequest(containerId));
+        } finally {
+            if (containerId != null) {
+                deleteMetadataContainerQuietly(containerId);
             }
+        }
+    }
+
+    private static String createMetadataContainer() {
+        HttpResponse response = sendTooling(
+            'POST',
+            '/sobjects/MetadataContainer',
+            JSON.serialize(new Map<String, Object>{ 'Name' => 'PromptToFlow_' + String.valueOf(Datetime.now().getTime()) })
+        );
+        if (response.getStatusCode() >= 300) {
+            throwApexWriteError(response);
+        }
+        return idFromResponse(response);
+    }
+
+    private static void createApexClassMember(String containerId, String contentEntityId, String classBody) {
+        HttpResponse response = sendTooling(
+            'POST',
+            '/sobjects/ApexClassMember',
+            JSON.serialize(new Map<String, Object>{
+                'MetadataContainerId' => containerId,
+                'ContentEntityId' => contentEntityId,
+                'Body' => classBody
+            })
+        );
+        if (response.getStatusCode() >= 300) {
+            throwApexWriteError(response);
+        }
+    }
+
+    private static String createContainerAsyncRequest(String containerId) {
+        HttpResponse response = sendTooling(
+            'POST',
+            '/sobjects/ContainerAsyncRequest',
+            JSON.serialize(new Map<String, Object>{ 'MetadataContainerId' => containerId, 'IsCheckOnly' => false })
+        );
+        if (response.getStatusCode() >= 300) {
+            throwApexWriteError(response);
+        }
+        return idFromResponse(response);
+    }
+
+    private static void awaitContainerCompile(String requestId) {
+        for (Integer attempt = 0; attempt < 30; attempt++) {
+            HttpResponse response = sendTooling('GET', '/sobjects/ContainerAsyncRequest/' + requestId, null);
+            if (response.getStatusCode() >= 300) {
+                throwApexWriteError(response);
+            }
+            Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(response.getBody());
+            String state = (String) payload.get('State');
+            if (state == 'Completed') {
+                return;
+            }
+            if (state != 'Queued' && state != 'InProgress') {
+                throw new AuraHandledException('Apex class compile failed: ' + extractCompileError(payload));
+            }
+        }
+        throw new AuraHandledException('Timed out waiting for the parser class to compile. Please try saving again.');
+    }
+
+    private static void deleteMetadataContainerQuietly(String containerId) {
+        try {
+            sendTooling('DELETE', '/sobjects/MetadataContainer/' + containerId, null);
+        } catch (Exception ignored) {
+            // Best-effort cleanup; a leftover container does not affect functionality.
+        }
+    }
+
+    private static HttpResponse sendTooling(String method, String path, String body) {
+        HttpRequest request = new HttpRequest();
+        request.setMethod(method);
+        request.setEndpoint(getToolingApiBaseUrl() + path);
+        request.setTimeout(120000);
+        if (body != null) {
+            request.setHeader('Content-Type', 'application/json');
+            request.setBody(body);
+        }
+        return new Http().send(request);
+    }
+
+    private static String idFromResponse(HttpResponse response) {
+        Map<String, Object> payload = (Map<String, Object>) JSON.deserializeUntyped(response.getBody());
+        return (String) payload.get('id');
+    }
+
+    private static String extractCompileError(Map<String, Object> payload) {
+        Object errorMsg = payload.get('ErrorMsg');
+        if (errorMsg != null) {
+            return String.valueOf(errorMsg);
+        }
+        Object deployDetails = payload.get('DeployDetails');
+        if (deployDetails instanceof Map<String, Object>) {
+            Object failures = ((Map<String, Object>) deployDetails).get('componentFailures');
+            if (failures instanceof List<Object>) {
+                List<String> messages = new List<String>();
+                for (Object failure : (List<Object>) failures) {
+                    if (failure instanceof Map<String, Object>) {
+                        Object problem = ((Map<String, Object>) failure).get('problem');
+                        if (problem != null) {
+                            messages.add(String.valueOf(problem));
+                        }
+                    }
+                }
+                if (!messages.isEmpty()) {
+                    return String.join(messages, '; ');
+                }
+            }
+        }
+        return 'Unknown compile error.';
+    }
+
+    private static void throwApexWriteError(HttpResponse response) {
+        if (response.getStatusCode() == 401) {
             throw new AuraHandledException(
-                'Failed to upsert Apex class (status ' + String.valueOf(response.getStatusCode()) + '): ' +
-                extractToolingError(response.getBody())
+                'Tooling API authentication failed from Named Credential (401). ' +
+                'Configure Named Credential "' + TOOLING_NAMED_CREDENTIAL + '" with valid Salesforce OAuth access.'
             );
         }
+        throw new AuraHandledException(
+            'Failed to upsert Apex class (status ' + String.valueOf(response.getStatusCode()) + '): ' +
+            extractToolingError(response.getBody())
+        );
     }
 
     private static String findApexClassIdByName(String className) {
