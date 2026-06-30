@@ -3,10 +3,12 @@ public with sharing class PromptToFlowController {
     private static final String SETUP_PERMISSION_SET_API_NAME = 'PromptToFlow_User';
     public class ObjectOption {
         @AuraEnabled public String label;
+        @AuraEnabled public String pluralLabel;
         @AuraEnabled public String apiName;
 
-        public ObjectOption(String label, String apiName) {
+        public ObjectOption(String label, String pluralLabel, String apiName) {
             this.label = label;
+            this.pluralLabel = pluralLabel;
             this.apiName = apiName;
         }
     }
@@ -50,11 +52,16 @@ public with sharing class PromptToFlowController {
 
     private class ObjectConfig {
         public String apiName;
+        // The JSON property name used in the template and read by the parser.
+        // For collections this is the object's plural label (e.g. "Opportunities");
+        // for single records it is the object API name. Falls back to apiName.
+        public String jsonKey;
         public Boolean isCollection;
         public List<String> selectedFields;
 
-        public ObjectConfig(String apiName, Boolean isCollection, List<String> selectedFields) {
+        public ObjectConfig(String apiName, String jsonKey, Boolean isCollection, List<String> selectedFields) {
             this.apiName = apiName;
+            this.jsonKey = String.isBlank(jsonKey) ? apiName : jsonKey;
             this.isCollection = isCollection;
             this.selectedFields = selectedFields;
         }
@@ -72,7 +79,7 @@ public with sharing class PromptToFlowController {
             if (isAuxiliaryObject(describe.getName())) {
                 continue;
             }
-            objectOptions.add(new ObjectOption(describe.getLabel(), describe.getName()));
+            objectOptions.add(new ObjectOption(describe.getLabel(), describe.getLabelPlural(), describe.getName()));
         }
 
         return objectOptions;
@@ -341,14 +348,17 @@ public with sharing class PromptToFlowController {
         for (ObjectConfig config : configs) {
             String variableName = toUniqueVariableName(config.apiName, usedVariableNames);
             String fieldSetLiteral = toFieldSetLiteral(config.selectedFields);
+            // The JSON property name (collections use the plural label) must match
+            // the template the prompt produces; the SObject type stays the API name.
+            String escapedJsonKey = String.escapeSingleQuotes(config.jsonKey);
 
             if (config.isCollection) {
                 responseProperties.add(
-                    '        @InvocableVariable(label=\'' + config.apiName + '\')\n' +
+                    '        @InvocableVariable(label=\'' + escapedJsonKey + '\')\n' +
                     '        public List<' + config.apiName + '> ' + variableName + ' = new List<' + config.apiName + '>();'
                 );
                 parseBlocks.add(
-                    '                for (Object item : PromptToFlowParserRuntime.asList(payload.get(\'' + config.apiName + '\'))) {\n' +
+                    '                for (Object item : PromptToFlowParserRuntime.asList(payload.get(\'' + escapedJsonKey + '\'))) {\n' +
                     '                    ' + config.apiName + ' recordItem = new ' + config.apiName + '();\n' +
                     '                    PromptToFlowParserRuntime.populateFromMap(recordItem, PromptToFlowParserRuntime.asMap(item), ' + fieldSetLiteral + ');\n' +
                     '                    responseItem.' + variableName + '.add(recordItem);\n' +
@@ -356,11 +366,11 @@ public with sharing class PromptToFlowController {
                 );
             } else {
                 responseProperties.add(
-                    '        @InvocableVariable(label=\'' + config.apiName + '\')\n' +
+                    '        @InvocableVariable(label=\'' + escapedJsonKey + '\')\n' +
                     '        public ' + config.apiName + ' ' + variableName + ';'
                 );
                 parseBlocks.add(
-                    '                Map<String, Object> ' + variableName + 'Values = PromptToFlowParserRuntime.asMap(payload.get(\'' + config.apiName + '\'));\n' +
+                    '                Map<String, Object> ' + variableName + 'Values = PromptToFlowParserRuntime.asMap(payload.get(\'' + escapedJsonKey + '\'));\n' +
                     '                if (!' + variableName + 'Values.isEmpty()) {\n' +
                     '                    ' + config.apiName + ' recordItem = new ' + config.apiName + '();\n' +
                     '                    PromptToFlowParserRuntime.populateFromMap(recordItem, ' + variableName + 'Values, ' + fieldSetLiteral + ');\n' +
@@ -425,13 +435,14 @@ public with sharing class PromptToFlowController {
         for (Object rawItem : rawList) {
             Map<String, Object> configMap = (Map<String, Object>) rawItem;
             String apiName = (String) configMap.get('apiName');
+            String jsonKey = (String) configMap.get('jsonKey');
             Boolean isCollection = configMap.containsKey('isCollection') ? (Boolean) configMap.get('isCollection') : true;
             List<String> selectedFields = new List<String>();
             for (Object rawField : (List<Object>) configMap.get('selectedFields')) {
                 selectedFields.add((String) rawField);
             }
             if (!String.isBlank(apiName)) {
-                result.add(new ObjectConfig(apiName, isCollection, selectedFields));
+                result.add(new ObjectConfig(apiName, jsonKey, isCollection, selectedFields));
             }
         }
         return result;

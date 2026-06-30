@@ -1,0 +1,53 @@
+.ptf-workspace {
+    position: relative;
+}
+
+.ptf-body {
+    min-height: 28rem;
+}
+
+.ptf-rail {
+    border-right: 1px solid #e5e5e5;
+    display: flex;
+    flex-direction: column;
+}
+
+.ptf-rail-scroll {
+    overflow-y: auto;
+    max-height: 60vh;
+}
+
+.ptf-detail {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.ptf-full-width {
+    width: 100%;
+}
+
+.ptf-full-width ::part(button) {
+    width: 100%;
+}
+
+.slds-border_bottom {
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.ptf-saving {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.6);
+}
+
+@media (max-width: 48em) {
+    .ptf-rail {
+        border-right: none;
+        border-bottom: 1px solid #e5e5e5;
+    }
+
+    .ptf-detail,
+    .ptf-rail-scroll {
+        max-height: none;
+    }
+}

@@ -1,5 +1,6 @@
 import { LightningElement, track } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import LightningConfirm from 'lightning/confirm';
 import getAvailableObjects from '@salesforce/apex/PromptToFlowController.getAvailableObjects';
 import getFieldsForObject from '@salesforce/apex/PromptToFlowController.getFieldsForObject';
 import getConfigurations from '@salesforce/apex/PromptToFlowController.getConfigurations';
@@ -9,22 +10,25 @@ import generateParserForConfiguration from '@salesforce/apex/PromptToFlowControl
 import getParserGenerationSetupStatus from '@salesforce/apex/PromptToFlowController.getParserGenerationSetupStatus';
 import assignSetupPermissionSetToCurrentUser from '@salesforce/apex/PromptToFlowController.assignSetupPermissionSetToCurrentUser';
 
-export default class PromptToFlowBuilder extends LightningElement {
+export default class PromptToFlowBuilderCompact extends LightningElement {
     @track objectOptions = [];
-    @track configurationOptions = [];
+    @track configurations = [];
     @track selectedObjects = [];
     @track jsonOutput = '';
     @track setupStatus = {};
     @track isSaving = false;
+    @track isLoadingConfig = false;
+    @track showPreview = false;
 
     selectedConfigurationId;
     configurationName = '';
     invocableActionLabel = '';
     parserClassName = '';
     parserClassNameLocked = false;
-    generateParserOnSave = true;
-    objectToAdd;
+    activeTab;
     nextId = 1;
+    isDirty = false;
+    configsLoaded = false;
 
     connectedCallback() {
         this.initialize();
@@ -34,12 +38,67 @@ export default class PromptToFlowBuilder extends LightningElement {
         await Promise.all([this.loadObjects(), this.loadConfigurations(), this.loadSetupStatus()]);
     }
 
-    get disableAddObject() {
-        return !this.objectToAdd;
+    // ----- Derived state -----
+    get isBusy() {
+        return this.isSaving || this.isLoadingConfig;
     }
 
     get hasSelectedObjects() {
         return this.selectedObjects.length > 0;
+    }
+
+    get navItems() {
+        return this.selectedObjects.map((item) => ({
+            id: item.id,
+            shortLabel: item.shortLabel,
+            selectedCount: item.selectedCount,
+            isConfigured: item.isConfigured,
+            iconName: item.isCollection ? 'utility:record_collection' : 'utility:record_alt',
+            iconAlt: item.isCollection ? 'Collection' : 'Single record',
+            ariaSelected: item.id === this.activeTab ? 'true' : 'false',
+            itemClass:
+                item.id === this.activeTab
+                    ? 'slds-vertical-tabs__nav-item slds-is-active'
+                    : 'slds-vertical-tabs__nav-item'
+        }));
+    }
+
+    get activeObject() {
+        return this.selectedObjects.find((item) => item.id === this.activeTab);
+    }
+
+    get availableObjectOptions() {
+        const used = new Set(this.selectedObjects.filter((item) => item.apiName).map((item) => item.apiName));
+        return this.objectOptions.filter((option) => !used.has(option.value));
+    }
+
+    get hasConfigurations() {
+        return this.configurations.length > 0;
+    }
+
+    get showConfigLoading() {
+        return !this.configsLoaded;
+    }
+
+    get showConfigEmpty() {
+        return this.configsLoaded && this.configurations.length === 0;
+    }
+
+    get openMenuItems() {
+        return this.configurations.map((item) => ({
+            id: item.id,
+            name: item.name,
+            checked: item.id === this.selectedConfigurationId
+        }));
+    }
+
+    get statusLabel() {
+        if (!this.selectedConfigurationId) {
+            return 'Draft — not yet saved';
+        }
+        return this.parserClassNameLocked && this.parserClassName
+            ? `Saved · Parser class ${this.parserClassName}`
+            : 'Saved';
     }
 
     get derivedParserClassName() {
@@ -49,26 +108,40 @@ export default class PromptToFlowBuilder extends LightningElement {
         return this.toSafeClassName(this.invocableActionLabel);
     }
 
+    get parserClassHelpText() {
+        const name = this.derivedParserClassName;
+        if (!name) {
+            return 'A parser Apex class is generated automatically from the action label when you save.';
+        }
+        return this.parserClassNameLocked
+            ? `Parser class: ${name} (locked after first save).`
+            : `Parser class will be generated as ${name} on save.`;
+    }
+
     get setupMessage() {
         return this.setupStatus && this.setupStatus.message ? this.setupStatus.message : '';
     }
 
     get showSetupBanner() {
-        return this.generateParserOnSave && this.setupStatus && this.setupStatus.ready === false;
+        return this.setupStatus && this.setupStatus.ready === false;
     }
 
     get canAutoAssignPermissionSet() {
         return this.setupStatus && this.setupStatus.canAutoAssignPermissionSet === true;
     }
 
+    get previewToggleLabel() {
+        return this.showPreview ? 'Hide JSON preview' : 'Show JSON preview';
+    }
+
+    // ----- Data loading -----
     async loadObjects() {
         try {
             const objects = await getAvailableObjects();
             this.objectOptions = objects
                 .map((item) => ({
                     label: `${item.label} (${item.apiName})`,
-                    value: item.apiName,
-                    pluralLabel: item.pluralLabel
+                    value: item.apiName
                 }))
                 .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
         } catch (error) {
@@ -79,12 +152,14 @@ export default class PromptToFlowBuilder extends LightningElement {
     async loadConfigurations() {
         try {
             const configs = await getConfigurations();
-            this.configurationOptions = configs.map((item) => ({
-                label: item.name,
-                value: item.id
+            this.configurations = configs.map((item) => ({
+                id: item.id,
+                name: item.name
             }));
         } catch (error) {
             this.showError('Unable to load configurations', error);
+        } finally {
+            this.configsLoaded = true;
         }
     }
 
@@ -99,29 +174,38 @@ export default class PromptToFlowBuilder extends LightningElement {
         }
     }
 
-    handleConfigurationSelect(event) {
+    async handleOpenConfiguration(event) {
         const configId = event.detail.value;
-        this.selectedConfigurationId = configId;
-        if (configId) {
-            this.loadConfiguration(configId);
+        if (!configId || configId === this.selectedConfigurationId) {
+            return;
         }
+        const proceed = await this.confirmDiscardIfDirty();
+        if (!proceed) {
+            return;
+        }
+        this.selectedConfigurationId = configId;
+        this.loadConfiguration(configId);
     }
 
     async loadConfiguration(configurationId) {
+        this.isLoadingConfig = true;
         try {
             const dto = await getConfiguration({ configurationId });
             this.configurationName = dto.name || '';
             this.invocableActionLabel = dto.invocableActionLabel || '';
             this.parserClassName = dto.parserClassName || '';
             this.parserClassNameLocked = dto.parserClassNameLocked === true;
-            this.generateParserOnSave = dto.generateParserOnSave === true;
 
             const parsed = dto.configurationJson ? JSON.parse(dto.configurationJson) : [];
             const objectConfigs = Array.isArray(parsed) ? parsed : parsed.selectedObjects || [];
             await this.hydrateSelectedObjects(objectConfigs);
+            this.activeTab = this.selectedObjects.length ? this.selectedObjects[0].id : undefined;
             this.handleGenerateTemplate();
+            this.isDirty = false;
         } catch (error) {
             this.showError('Unable to load configuration', error);
+        } finally {
+            this.isLoadingConfig = false;
         }
     }
 
@@ -131,52 +215,92 @@ export default class PromptToFlowBuilder extends LightningElement {
                 const id = String(this.nextId++);
                 const option = this.objectOptions.find((item) => item.value === rawConfig.apiName);
                 const fields = await getFieldsForObject({ objectApiName: rawConfig.apiName });
-                const mappedFields = fields
-                    .map((field) => ({
-                        label: `${field.label} (${field.apiName})`,
-                        value: field.apiName,
-                        dataType: field.dataType,
-                        keyPrefix: field.keyPrefix
-                    }))
-                    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-
+                const selectedFields = [...(rawConfig.selectedFields || [])];
                 return {
                     id,
                     apiName: rawConfig.apiName,
                     label: option ? option.label : rawConfig.apiName,
-                    pluralLabel: (option && option.pluralLabel) || rawConfig.pluralLabel || rawConfig.apiName,
+                    shortLabel: this.shortLabel(option ? option.label : rawConfig.apiName),
+                    isConfigured: true,
                     isCollection: rawConfig.isCollection !== false,
                     isLoading: false,
-                    fieldOptions: mappedFields,
-                    selectedFields: [...(rawConfig.selectedFields || [])]
+                    fieldOptions: this.mapFields(fields),
+                    selectedFields,
+                    selectedCount: selectedFields.length
                 };
             })
         );
-
         this.selectedObjects = hydrated;
     }
 
+    mapFields(fields) {
+        return fields
+            .map((field) => ({
+                label: `${field.label} (${field.apiName})`,
+                value: field.apiName,
+                dataType: field.dataType,
+                keyPrefix: field.keyPrefix
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+    }
+
+    shortLabel(label) {
+        if (!label) {
+            return label;
+        }
+        return label.replace(/\s*\(.*\)\s*$/, '');
+    }
+
+    // ----- Form handlers -----
     handleConfigurationNameChange(event) {
         this.configurationName = event.detail.value;
+        this.isDirty = true;
     }
 
     handleInvocableActionLabelChange(event) {
         this.invocableActionLabel = event.detail.value;
+        this.isDirty = true;
     }
 
-    handleGenerateParserToggle(event) {
-        this.generateParserOnSave = event.target.checked;
+    handleConfigurationNameBlur() {
+        const name = (this.configurationName || '').trim();
+        const label = (this.invocableActionLabel || '').trim();
+        if (name && !label) {
+            this.invocableActionLabel = `Parse ${name}`;
+            this.isDirty = true;
+        }
     }
 
-    handleNewConfiguration() {
+    async confirmDiscardIfDirty() {
+        if (!this.isDirty) {
+            return true;
+        }
+        return LightningConfirm.open({
+            message: 'You have unsaved changes that will be lost. Do you want to continue?',
+            label: 'Discard unsaved changes?',
+            theme: 'warning',
+            variant: 'header'
+        });
+    }
+
+    async handleNewConfiguration() {
+        const proceed = await this.confirmDiscardIfDirty();
+        if (!proceed) {
+            return;
+        }
+        this.resetForm();
+    }
+
+    resetForm() {
         this.selectedConfigurationId = null;
         this.configurationName = '';
         this.invocableActionLabel = '';
         this.parserClassName = '';
         this.parserClassNameLocked = false;
-        this.generateParserOnSave = true;
         this.selectedObjects = [];
         this.jsonOutput = '';
+        this.activeTab = undefined;
+        this.isDirty = false;
     }
 
     async handleSaveConfiguration() {
@@ -190,7 +314,7 @@ export default class PromptToFlowBuilder extends LightningElement {
         }
         const configurationModel = this.exportConfigurationModel();
         if (configurationModel.length === 0) {
-            this.showToast('Validation', 'Add at least one object configuration before saving.', 'warning');
+            this.showToast('Validation', 'Add and select at least one object before saving.', 'warning');
             return;
         }
 
@@ -204,7 +328,7 @@ export default class PromptToFlowBuilder extends LightningElement {
                 configurationJson: configurationModelJson,
                 templateJson,
                 invocableActionLabel: this.invocableActionLabel,
-                generateParserOnSave: this.generateParserOnSave
+                generateParserOnSave: true
             });
 
             this.selectedConfigurationId = saved.id;
@@ -212,19 +336,17 @@ export default class PromptToFlowBuilder extends LightningElement {
             this.invocableActionLabel = saved.invocableActionLabel || '';
             this.parserClassName = saved.parserClassName || '';
             this.parserClassNameLocked = saved.parserClassNameLocked === true;
-            this.generateParserOnSave = saved.generateParserOnSave === true;
 
-            if (this.generateParserOnSave && this.parserClassName) {
+            if (this.parserClassName) {
                 await this.loadSetupStatus();
                 if (!this.setupStatus.ready) {
                     throw new Error(this.setupMessage || 'Parser generation setup is incomplete.');
                 }
-                await generateParserForConfiguration({
-                    configurationId: saved.id
-                });
+                await generateParserForConfiguration({ configurationId: saved.id });
             }
 
             await Promise.all([this.loadConfigurations(), this.loadSetupStatus()]);
+            this.isDirty = false;
             this.showToast('Saved', 'Configuration saved successfully.', 'success');
         } catch (error) {
             this.showError('Unable to save configuration', error);
@@ -234,24 +356,14 @@ export default class PromptToFlowBuilder extends LightningElement {
     }
 
     exportConfigurationModel() {
-        return this.selectedObjects.map((item) => ({
-            apiName: item.apiName,
-            jsonKey: this.getJsonKey(item),
-            isCollection: item.isCollection,
-            selectedFields: [...item.selectedFields]
-        }));
+        return this.selectedObjects
+            .filter((item) => item.apiName)
+            .map((item) => ({
+                apiName: item.apiName,
+                isCollection: item.isCollection,
+                selectedFields: [...item.selectedFields]
+            }));
     }
-
-    // Collections use the object's plural label as the JSON property name (e.g.
-    // "Opportunities"); single records keep the API name (e.g. "Account"). The
-    // generated parser reads these same keys, so both must stay in sync.
-    getJsonKey(objectConfig) {
-        if (objectConfig.isCollection) {
-            return objectConfig.pluralLabel || objectConfig.apiName;
-        }
-        return objectConfig.apiName;
-    }
-
 
     async handleAutoAssignPermissionSet() {
         try {
@@ -266,65 +378,89 @@ export default class PromptToFlowBuilder extends LightningElement {
         }
     }
 
-    handleObjectChange(event) {
-        this.objectToAdd = event.detail.value;
+    // ----- Object / field handlers -----
+    handleAddObjectTab() {
+        const id = String(this.nextId++);
+        const newObject = {
+            id,
+            apiName: '',
+            label: '',
+            shortLabel: 'New object',
+            isConfigured: false,
+            isCollection: true,
+            isLoading: false,
+            fieldOptions: [],
+            selectedFields: [],
+            selectedCount: 0
+        };
+        this.selectedObjects = [...this.selectedObjects, newObject];
+        this.activeTab = id;
+        this.isDirty = true;
     }
 
-    async handleAddObject() {
-        if (!this.objectToAdd || this.selectedObjects.some((obj) => obj.apiName === this.objectToAdd)) {
+    handleSelectTab(event) {
+        event.preventDefault();
+        this.activeTab = event.currentTarget.dataset.id;
+    }
+
+    async handleObjectPicked(event) {
+        const id = event.target.dataset.id;
+        const apiName = event.detail.value;
+        if (!apiName) {
+            return;
+        }
+        if (this.selectedObjects.some((obj) => obj.apiName === apiName)) {
+            this.showToast('Already added', 'That object is already part of this configuration.', 'warning');
             return;
         }
 
-        const objectOption = this.objectOptions.find((option) => option.value === this.objectToAdd);
-        const newObject = {
-            id: String(this.nextId++),
-            apiName: this.objectToAdd,
-            label: objectOption ? objectOption.label : this.objectToAdd,
-            pluralLabel: (objectOption && objectOption.pluralLabel) || this.objectToAdd,
-            isCollection: true,
-            isLoading: true,
-            fieldOptions: [],
-            selectedFields: []
-        };
-
-        this.selectedObjects = [...this.selectedObjects, newObject];
-        this.objectToAdd = null;
+        const objectOption = this.objectOptions.find((option) => option.value === apiName);
+        const label = objectOption ? objectOption.label : apiName;
+        this.isDirty = true;
+        this.updateObjectConfig(id, {
+            apiName,
+            label,
+            shortLabel: this.shortLabel(label),
+            isConfigured: true,
+            isLoading: true
+        });
 
         try {
-            const fields = await getFieldsForObject({ objectApiName: newObject.apiName });
-            const mappedFields = fields
-                .map((field) => ({
-                    label: `${field.label} (${field.apiName})`,
-                    value: field.apiName,
-                    dataType: field.dataType,
-                    keyPrefix: field.keyPrefix
-                }))
-                .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-            this.updateObjectConfig(newObject.id, {
-                fieldOptions: mappedFields,
+            const fields = await getFieldsForObject({ objectApiName: apiName });
+            this.updateObjectConfig(id, {
+                fieldOptions: this.mapFields(fields),
                 isLoading: false
             });
         } catch (error) {
-            this.updateObjectConfig(newObject.id, { isLoading: false });
-            this.showError(`Unable to load fields for ${newObject.apiName}`, error);
+            this.updateObjectConfig(id, { isLoading: false });
+            this.showError(`Unable to load fields for ${apiName}`, error);
         }
+        this.handleGenerateTemplate();
     }
 
     handleRemoveObject(event) {
         const id = event.currentTarget.dataset.id;
-        this.selectedObjects = this.selectedObjects.filter((item) => item.id !== id);
+        const remaining = this.selectedObjects.filter((item) => item.id !== id);
+        this.selectedObjects = remaining;
+        if (this.activeTab === id) {
+            this.activeTab = remaining.length ? remaining[0].id : undefined;
+        }
+        this.isDirty = true;
         this.handleGenerateTemplate();
     }
 
     handleCollectionToggle(event) {
         const id = event.target.dataset.id;
         this.updateObjectConfig(id, { isCollection: event.target.checked });
+        this.isDirty = true;
         this.handleGenerateTemplate();
     }
 
     handleFieldSelection(event) {
         const id = event.target.dataset.id;
-        this.updateObjectConfig(id, { selectedFields: event.detail.value });
+        const value = event.detail.value;
+        this.updateObjectConfig(id, { selectedFields: value, selectedCount: value.length });
+        this.isDirty = true;
         this.handleGenerateTemplate();
     }
 
@@ -332,27 +468,34 @@ export default class PromptToFlowBuilder extends LightningElement {
         this.jsonOutput = this.buildTemplateJson();
     }
 
+    togglePreview() {
+        this.showPreview = !this.showPreview;
+        if (this.showPreview) {
+            this.handleGenerateTemplate();
+        }
+    }
+
     buildTemplateJson() {
         const template = {};
-
         this.selectedObjects.forEach((objectConfig) => {
+            if (!objectConfig.apiName) {
+                return;
+            }
             const selectedFieldMap = {};
             objectConfig.selectedFields.forEach((fieldApiName) => {
                 const field = objectConfig.fieldOptions.find((option) => option.value === fieldApiName);
                 selectedFieldMap[fieldApiName] = this.getPlaceholderValue(field);
             });
-
-            template[this.getJsonKey(objectConfig)] = objectConfig.isCollection ? [selectedFieldMap] : selectedFieldMap;
+            template[objectConfig.apiName] = objectConfig.isCollection ? [selectedFieldMap] : selectedFieldMap;
         });
-
         return JSON.stringify(template, null, 2);
     }
 
     async handleCopyOutput() {
+        this.handleGenerateTemplate();
         if (!this.jsonOutput) {
             return;
         }
-
         try {
             await navigator.clipboard.writeText(this.jsonOutput);
             this.showToast('Copied', 'JSON template copied to clipboard.', 'success');
@@ -363,15 +506,11 @@ export default class PromptToFlowBuilder extends LightningElement {
 
     updateObjectConfig(id, updates) {
         this.selectedObjects = this.selectedObjects.map((item) =>
-            item.id === id
-                ? {
-                      ...item,
-                      ...updates
-                  }
-                : item
+            item.id === id ? { ...item, ...updates } : item
         );
     }
 
+    // ----- Placeholder + utility helpers -----
     getIdPlaceholder(keyPrefix) {
         const prefix = keyPrefix && keyPrefix.length === 3 ? keyPrefix : '001';
         return `${prefix}${'X'.repeat(18 - prefix.length)}`;
@@ -412,18 +551,11 @@ export default class PromptToFlowBuilder extends LightningElement {
     }
 
     showToast(title, message, variant) {
-        this.dispatchEvent(
-            new ShowToastEvent({
-                title,
-                message,
-                variant
-            })
-        );
+        this.dispatchEvent(new ShowToastEvent({ title, message, variant }));
     }
 
     showError(title, error) {
-        const message = this.extractErrorMessage(error);
-        this.showToast(title, message, 'error');
+        this.showToast(title, this.extractErrorMessage(error), 'error');
     }
 
     extractErrorMessage(error) {

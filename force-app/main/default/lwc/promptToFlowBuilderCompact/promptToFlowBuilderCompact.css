@@ -1,0 +1,64 @@
+.ptf-compact {
+    position: relative;
+}
+
+/* Custom vertical tabs: object list rail + detail content. */
+.ptf-vtabs {
+    align-items: stretch;
+}
+
+.ptf-vtabs__rail {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 15rem;
+    width: 15rem;
+    border-right: 1px solid #dddbda;
+    background-color: #fafaf9;
+    overflow: hidden;
+}
+
+.ptf-vtabs__rail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.25rem 0.5rem 1rem;
+    border-bottom: 1px solid #dddbda;
+    flex: 0 0 auto;
+}
+
+/* Fill the remaining rail height and only scroll once the object list
+   actually overflows (min-height: 0 lets the flex child shrink correctly). */
+.ptf-vtabs__nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.ptf-vtabs__nav .slds-vertical-tabs__link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Reserve a stable height so the panel doesn't collapse between the
+   empty, "pick an object", and "fields selected" states. */
+.ptf-vtabs__content {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 24rem;
+    padding: 1rem 1.25rem;
+}
+
+.ptf-vtabs__empty {
+    min-height: 24rem;
+    text-align: center;
+}
+
+.ptf-saving {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.6);
+}

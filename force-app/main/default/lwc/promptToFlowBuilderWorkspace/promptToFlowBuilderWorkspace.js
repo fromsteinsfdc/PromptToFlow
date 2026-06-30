@@ -1,5 +1,6 @@
 import { LightningElement, track } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
+import LightningConfirm from 'lightning/confirm';
 import getAvailableObjects from '@salesforce/apex/PromptToFlowController.getAvailableObjects';
 import getFieldsForObject from '@salesforce/apex/PromptToFlowController.getFieldsForObject';
 import getConfigurations from '@salesforce/apex/PromptToFlowController.getConfigurations';
@@ -9,22 +10,24 @@ import generateParserForConfiguration from '@salesforce/apex/PromptToFlowControl
 import getParserGenerationSetupStatus from '@salesforce/apex/PromptToFlowController.getParserGenerationSetupStatus';
 import assignSetupPermissionSetToCurrentUser from '@salesforce/apex/PromptToFlowController.assignSetupPermissionSetToCurrentUser';
 
-export default class PromptToFlowBuilder extends LightningElement {
+export default class PromptToFlowBuilderWorkspace extends LightningElement {
     @track objectOptions = [];
-    @track configurationOptions = [];
+    @track configurations = [];
     @track selectedObjects = [];
     @track jsonOutput = '';
     @track setupStatus = {};
     @track isSaving = false;
+    @track showPreview = false;
 
     selectedConfigurationId;
     configurationName = '';
     invocableActionLabel = '';
     parserClassName = '';
     parserClassNameLocked = false;
-    generateParserOnSave = true;
     objectToAdd;
+    activeSection;
     nextId = 1;
+    isDirty = false;
 
     connectedCallback() {
         this.initialize();
@@ -34,12 +37,37 @@ export default class PromptToFlowBuilder extends LightningElement {
         await Promise.all([this.loadObjects(), this.loadConfigurations(), this.loadSetupStatus()]);
     }
 
+    // ----- Derived state -----
     get disableAddObject() {
         return !this.objectToAdd;
     }
 
     get hasSelectedObjects() {
         return this.selectedObjects.length > 0;
+    }
+
+    get hasConfigurations() {
+        return this.configurations.length > 0;
+    }
+
+    get configurationItems() {
+        return this.configurations.map((item) => ({
+            id: item.id,
+            name: item.name,
+            isActive: item.id === this.selectedConfigurationId,
+            itemClass:
+                item.id === this.selectedConfigurationId
+                    ? 'slds-nav-vertical__item slds-is-active'
+                    : 'slds-nav-vertical__item'
+        }));
+    }
+
+    get accordionSections() {
+        return this.selectedObjects.map((item) => item.id);
+    }
+
+    get editorTitle() {
+        return this.configurationName ? this.configurationName : 'New configuration';
     }
 
     get derivedParserClassName() {
@@ -49,26 +77,40 @@ export default class PromptToFlowBuilder extends LightningElement {
         return this.toSafeClassName(this.invocableActionLabel);
     }
 
+    get parserClassHelpText() {
+        const name = this.derivedParserClassName;
+        if (!name) {
+            return 'A parser Apex class will be generated automatically from the action label.';
+        }
+        return this.parserClassNameLocked
+            ? `Parser class: ${name} (locked after first save)`
+            : `Parser class will be generated as: ${name}`;
+    }
+
     get setupMessage() {
         return this.setupStatus && this.setupStatus.message ? this.setupStatus.message : '';
     }
 
     get showSetupBanner() {
-        return this.generateParserOnSave && this.setupStatus && this.setupStatus.ready === false;
+        return this.setupStatus && this.setupStatus.ready === false;
     }
 
     get canAutoAssignPermissionSet() {
         return this.setupStatus && this.setupStatus.canAutoAssignPermissionSet === true;
     }
 
+    get previewToggleLabel() {
+        return this.showPreview ? 'Hide generated JSON' : 'Show generated JSON';
+    }
+
+    // ----- Data loading -----
     async loadObjects() {
         try {
             const objects = await getAvailableObjects();
             this.objectOptions = objects
                 .map((item) => ({
                     label: `${item.label} (${item.apiName})`,
-                    value: item.apiName,
-                    pluralLabel: item.pluralLabel
+                    value: item.apiName
                 }))
                 .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
         } catch (error) {
@@ -79,9 +121,9 @@ export default class PromptToFlowBuilder extends LightningElement {
     async loadConfigurations() {
         try {
             const configs = await getConfigurations();
-            this.configurationOptions = configs.map((item) => ({
-                label: item.name,
-                value: item.id
+            this.configurations = configs.map((item) => ({
+                id: item.id,
+                name: item.name
             }));
         } catch (error) {
             this.showError('Unable to load configurations', error);
@@ -99,12 +141,18 @@ export default class PromptToFlowBuilder extends LightningElement {
         }
     }
 
-    handleConfigurationSelect(event) {
-        const configId = event.detail.value;
-        this.selectedConfigurationId = configId;
-        if (configId) {
-            this.loadConfiguration(configId);
+    async handleConfigurationSelect(event) {
+        event.preventDefault();
+        const configId = event.currentTarget.dataset.id;
+        if (!configId || configId === this.selectedConfigurationId) {
+            return;
         }
+        const proceed = await this.confirmDiscardIfDirty();
+        if (!proceed) {
+            return;
+        }
+        this.selectedConfigurationId = configId;
+        this.loadConfiguration(configId);
     }
 
     async loadConfiguration(configurationId) {
@@ -114,12 +162,13 @@ export default class PromptToFlowBuilder extends LightningElement {
             this.invocableActionLabel = dto.invocableActionLabel || '';
             this.parserClassName = dto.parserClassName || '';
             this.parserClassNameLocked = dto.parserClassNameLocked === true;
-            this.generateParserOnSave = dto.generateParserOnSave === true;
 
             const parsed = dto.configurationJson ? JSON.parse(dto.configurationJson) : [];
             const objectConfigs = Array.isArray(parsed) ? parsed : parsed.selectedObjects || [];
             await this.hydrateSelectedObjects(objectConfigs);
+            this.activeSection = this.selectedObjects.length ? this.selectedObjects[0].id : undefined;
             this.handleGenerateTemplate();
+            this.isDirty = false;
         } catch (error) {
             this.showError('Unable to load configuration', error);
         }
@@ -131,24 +180,19 @@ export default class PromptToFlowBuilder extends LightningElement {
                 const id = String(this.nextId++);
                 const option = this.objectOptions.find((item) => item.value === rawConfig.apiName);
                 const fields = await getFieldsForObject({ objectApiName: rawConfig.apiName });
-                const mappedFields = fields
-                    .map((field) => ({
-                        label: `${field.label} (${field.apiName})`,
-                        value: field.apiName,
-                        dataType: field.dataType,
-                        keyPrefix: field.keyPrefix
-                    }))
-                    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+                const mappedFields = this.mapFields(fields);
+                const selectedFields = [...(rawConfig.selectedFields || [])];
 
                 return {
                     id,
                     apiName: rawConfig.apiName,
                     label: option ? option.label : rawConfig.apiName,
-                    pluralLabel: (option && option.pluralLabel) || rawConfig.pluralLabel || rawConfig.apiName,
+                    sectionName: id,
                     isCollection: rawConfig.isCollection !== false,
                     isLoading: false,
                     fieldOptions: mappedFields,
-                    selectedFields: [...(rawConfig.selectedFields || [])]
+                    selectedFields,
+                    selectedCount: selectedFields.length
                 };
             })
         );
@@ -156,27 +200,62 @@ export default class PromptToFlowBuilder extends LightningElement {
         this.selectedObjects = hydrated;
     }
 
+    mapFields(fields) {
+        return fields
+            .map((field) => ({
+                label: `${field.label} (${field.apiName})`,
+                value: field.apiName,
+                dataType: field.dataType,
+                keyPrefix: field.keyPrefix
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+    }
+
+    // ----- Form handlers -----
     handleConfigurationNameChange(event) {
         this.configurationName = event.detail.value;
+        this.isDirty = true;
     }
 
     handleInvocableActionLabelChange(event) {
         this.invocableActionLabel = event.detail.value;
+        this.isDirty = true;
     }
 
-    handleGenerateParserToggle(event) {
-        this.generateParserOnSave = event.target.checked;
+    handleSectionToggle(event) {
+        this.activeSection = event.detail.openSections;
     }
 
-    handleNewConfiguration() {
+    async confirmDiscardIfDirty() {
+        if (!this.isDirty) {
+            return true;
+        }
+        return LightningConfirm.open({
+            message: 'You have unsaved changes that will be lost. Do you want to continue?',
+            label: 'Discard unsaved changes?',
+            theme: 'warning',
+            variant: 'header'
+        });
+    }
+
+    async handleNewConfiguration() {
+        const proceed = await this.confirmDiscardIfDirty();
+        if (!proceed) {
+            return;
+        }
+        this.resetForm();
+    }
+
+    resetForm() {
         this.selectedConfigurationId = null;
         this.configurationName = '';
         this.invocableActionLabel = '';
         this.parserClassName = '';
         this.parserClassNameLocked = false;
-        this.generateParserOnSave = true;
         this.selectedObjects = [];
         this.jsonOutput = '';
+        this.activeSection = undefined;
+        this.isDirty = false;
     }
 
     async handleSaveConfiguration() {
@@ -204,7 +283,7 @@ export default class PromptToFlowBuilder extends LightningElement {
                 configurationJson: configurationModelJson,
                 templateJson,
                 invocableActionLabel: this.invocableActionLabel,
-                generateParserOnSave: this.generateParserOnSave
+                generateParserOnSave: true
             });
 
             this.selectedConfigurationId = saved.id;
@@ -212,19 +291,17 @@ export default class PromptToFlowBuilder extends LightningElement {
             this.invocableActionLabel = saved.invocableActionLabel || '';
             this.parserClassName = saved.parserClassName || '';
             this.parserClassNameLocked = saved.parserClassNameLocked === true;
-            this.generateParserOnSave = saved.generateParserOnSave === true;
 
-            if (this.generateParserOnSave && this.parserClassName) {
+            if (this.parserClassName) {
                 await this.loadSetupStatus();
                 if (!this.setupStatus.ready) {
                     throw new Error(this.setupMessage || 'Parser generation setup is incomplete.');
                 }
-                await generateParserForConfiguration({
-                    configurationId: saved.id
-                });
+                await generateParserForConfiguration({ configurationId: saved.id });
             }
 
             await Promise.all([this.loadConfigurations(), this.loadSetupStatus()]);
+            this.isDirty = false;
             this.showToast('Saved', 'Configuration saved successfully.', 'success');
         } catch (error) {
             this.showError('Unable to save configuration', error);
@@ -236,22 +313,10 @@ export default class PromptToFlowBuilder extends LightningElement {
     exportConfigurationModel() {
         return this.selectedObjects.map((item) => ({
             apiName: item.apiName,
-            jsonKey: this.getJsonKey(item),
             isCollection: item.isCollection,
             selectedFields: [...item.selectedFields]
         }));
     }
-
-    // Collections use the object's plural label as the JSON property name (e.g.
-    // "Opportunities"); single records keep the API name (e.g. "Account"). The
-    // generated parser reads these same keys, so both must stay in sync.
-    getJsonKey(objectConfig) {
-        if (objectConfig.isCollection) {
-            return objectConfig.pluralLabel || objectConfig.apiName;
-        }
-        return objectConfig.apiName;
-    }
-
 
     async handleAutoAssignPermissionSet() {
         try {
@@ -266,6 +331,7 @@ export default class PromptToFlowBuilder extends LightningElement {
         }
     }
 
+    // ----- Object / field handlers -----
     handleObjectChange(event) {
         this.objectToAdd = event.detail.value;
     }
@@ -276,36 +342,32 @@ export default class PromptToFlowBuilder extends LightningElement {
         }
 
         const objectOption = this.objectOptions.find((option) => option.value === this.objectToAdd);
+        const id = String(this.nextId++);
         const newObject = {
-            id: String(this.nextId++),
+            id,
             apiName: this.objectToAdd,
             label: objectOption ? objectOption.label : this.objectToAdd,
-            pluralLabel: (objectOption && objectOption.pluralLabel) || this.objectToAdd,
+            sectionName: id,
             isCollection: true,
             isLoading: true,
             fieldOptions: [],
-            selectedFields: []
+            selectedFields: [],
+            selectedCount: 0
         };
 
         this.selectedObjects = [...this.selectedObjects, newObject];
+        this.activeSection = id;
         this.objectToAdd = null;
+        this.isDirty = true;
 
         try {
             const fields = await getFieldsForObject({ objectApiName: newObject.apiName });
-            const mappedFields = fields
-                .map((field) => ({
-                    label: `${field.label} (${field.apiName})`,
-                    value: field.apiName,
-                    dataType: field.dataType,
-                    keyPrefix: field.keyPrefix
-                }))
-                .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
-            this.updateObjectConfig(newObject.id, {
-                fieldOptions: mappedFields,
+            this.updateObjectConfig(id, {
+                fieldOptions: this.mapFields(fields),
                 isLoading: false
             });
         } catch (error) {
-            this.updateObjectConfig(newObject.id, { isLoading: false });
+            this.updateObjectConfig(id, { isLoading: false });
             this.showError(`Unable to load fields for ${newObject.apiName}`, error);
         }
     }
@@ -313,18 +375,22 @@ export default class PromptToFlowBuilder extends LightningElement {
     handleRemoveObject(event) {
         const id = event.currentTarget.dataset.id;
         this.selectedObjects = this.selectedObjects.filter((item) => item.id !== id);
+        this.isDirty = true;
         this.handleGenerateTemplate();
     }
 
     handleCollectionToggle(event) {
         const id = event.target.dataset.id;
         this.updateObjectConfig(id, { isCollection: event.target.checked });
+        this.isDirty = true;
         this.handleGenerateTemplate();
     }
 
     handleFieldSelection(event) {
         const id = event.target.dataset.id;
-        this.updateObjectConfig(id, { selectedFields: event.detail.value });
+        const value = event.detail.value;
+        this.updateObjectConfig(id, { selectedFields: value, selectedCount: value.length });
+        this.isDirty = true;
         this.handleGenerateTemplate();
     }
 
@@ -332,27 +398,31 @@ export default class PromptToFlowBuilder extends LightningElement {
         this.jsonOutput = this.buildTemplateJson();
     }
 
+    togglePreview() {
+        this.showPreview = !this.showPreview;
+        if (this.showPreview) {
+            this.handleGenerateTemplate();
+        }
+    }
+
     buildTemplateJson() {
         const template = {};
-
         this.selectedObjects.forEach((objectConfig) => {
             const selectedFieldMap = {};
             objectConfig.selectedFields.forEach((fieldApiName) => {
                 const field = objectConfig.fieldOptions.find((option) => option.value === fieldApiName);
                 selectedFieldMap[fieldApiName] = this.getPlaceholderValue(field);
             });
-
-            template[this.getJsonKey(objectConfig)] = objectConfig.isCollection ? [selectedFieldMap] : selectedFieldMap;
+            template[objectConfig.apiName] = objectConfig.isCollection ? [selectedFieldMap] : selectedFieldMap;
         });
-
         return JSON.stringify(template, null, 2);
     }
 
     async handleCopyOutput() {
+        this.handleGenerateTemplate();
         if (!this.jsonOutput) {
             return;
         }
-
         try {
             await navigator.clipboard.writeText(this.jsonOutput);
             this.showToast('Copied', 'JSON template copied to clipboard.', 'success');
@@ -363,15 +433,11 @@ export default class PromptToFlowBuilder extends LightningElement {
 
     updateObjectConfig(id, updates) {
         this.selectedObjects = this.selectedObjects.map((item) =>
-            item.id === id
-                ? {
-                      ...item,
-                      ...updates
-                  }
-                : item
+            item.id === id ? { ...item, ...updates } : item
         );
     }
 
+    // ----- Placeholder + utility helpers -----
     getIdPlaceholder(keyPrefix) {
         const prefix = keyPrefix && keyPrefix.length === 3 ? keyPrefix : '001';
         return `${prefix}${'X'.repeat(18 - prefix.length)}`;
@@ -412,18 +478,11 @@ export default class PromptToFlowBuilder extends LightningElement {
     }
 
     showToast(title, message, variant) {
-        this.dispatchEvent(
-            new ShowToastEvent({
-                title,
-                message,
-                variant
-            })
-        );
+        this.dispatchEvent(new ShowToastEvent({ title, message, variant }));
     }
 
     showError(title, error) {
-        const message = this.extractErrorMessage(error);
-        this.showToast(title, message, 'error');
+        this.showToast(title, this.extractErrorMessage(error), 'error');
     }
 
     extractErrorMessage(error) {

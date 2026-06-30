@@ -48,6 +48,12 @@ private class PromptToFlowBootstrapControllerTest {
                 return res;
             }
 
+            if (url.contains('/tooling/query') && url.contains('ExternalCredential')) {
+                res.setStatusCode(200);
+                res.setBody('{"size":1,"records":[{"Id":"0ptTEST000000001","DeveloperName":"PromptToFlow_Tooling_Cred"}]}');
+                return res;
+            }
+
             // Tooling status check via the Named Credential.
             res.setStatusCode(200);
             res.setBody('{"records":[]}');
@@ -85,7 +91,11 @@ private class PromptToFlowBootstrapControllerTest {
         Test.stopTest();
 
         System.assertNotEquals(null, ctrl.statusMessage, 'Status message should be populated.');
-        System.assertEquals('/lightning/setup/NamedCredential/home', ctrl.externalCredentialUrl);
+        System.assertEquals(
+            '/lightning/setup/NamedCredential/ExternalCredential/0ptTEST000000001/view',
+            ctrl.externalCredentialUrl,
+            'Should deep-link to the resolved External Credential record.'
+        );
     }
 
     @isTest

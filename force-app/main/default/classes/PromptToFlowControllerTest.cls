@@ -161,6 +161,24 @@ private class PromptToFlowControllerTest {
     }
 
     @IsTest
+    static void generateInvocableParserSource_collectionUsesJsonKey() {
+        String configJson = JSON.serialize(new List<Object>{
+            new Map<String, Object>{
+                'apiName' => 'Opportunity',
+                'jsonKey' => 'Opportunities',
+                'isCollection' => true,
+                'selectedFields' => new List<String>{ 'StageName' }
+            }
+        });
+
+        String source = PromptToFlowController.generateInvocableParserSource('DemoPluralParser', configJson, 'Demo Plural');
+
+        System.assert(source.contains('payload.get(\'Opportunities\')'), 'Parser should read the plural JSON key.');
+        System.assert(source.contains('List<Opportunity>'), 'SObject type should stay the API name.');
+        System.assert(source.contains('@InvocableVariable(label=\'Opportunities\')'), 'Output label should use the plural key.');
+    }
+
+    @IsTest
     static void saveConfiguration_generateParserOnSave_usesToolingApi() {
         String configJson = JSON.serialize(new Map<String, Object>{
             'selectedObjects' => new List<Object>{

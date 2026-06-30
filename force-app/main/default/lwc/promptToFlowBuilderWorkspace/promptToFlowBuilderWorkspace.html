@@ -1,0 +1,238 @@
+<template>
+    <div class="slds-card ptf-workspace">
+        <!-- Page header -->
+        <div class="slds-page-header slds-page-header_joined">
+            <div class="slds-page-header__row">
+                <div class="slds-page-header__col-title">
+                    <div class="slds-media">
+                        <div class="slds-media__figure">
+                            <lightning-icon icon-name="utility:builder" size="small"></lightning-icon>
+                        </div>
+                        <div class="slds-media__body">
+                            <div class="slds-page-header__name">
+                                <div class="slds-page-header__name-title">
+                                    <h1>
+                                        <span class="slds-page-header__title slds-truncate" title={editorTitle}>{editorTitle}</span>
+                                    </h1>
+                                </div>
+                            </div>
+                            <p class="slds-page-header__name-meta">JSON Template Builder</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="slds-page-header__col-actions">
+                    <div class="slds-page-header__controls">
+                        <div class="slds-page-header__control">
+                            <lightning-button
+                                label="Save"
+                                variant="brand"
+                                icon-name="utility:save"
+                                onclick={handleSaveConfiguration}
+                                disabled={isSaving}
+                            ></lightning-button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="slds-grid slds-wrap ptf-body">
+            <!-- Left rail: saved configurations -->
+            <div class="slds-col slds-size_1-of-1 slds-medium-size_4-of-12 slds-large-size_3-of-12 ptf-rail">
+                <div class="slds-p-around_small slds-border_bottom">
+                    <lightning-button
+                        label="New configuration"
+                        variant="brand-outline"
+                        icon-name="utility:add"
+                        class="ptf-full-width"
+                        onclick={handleNewConfiguration}
+                    ></lightning-button>
+                </div>
+
+                <div class="ptf-rail-scroll">
+                    <template if:true={hasConfigurations}>
+                        <nav class="slds-nav-vertical" aria-label="Saved configurations">
+                            <ul class="slds-nav-vertical__section">
+                                <template for:each={configurationItems} for:item="config">
+                                    <li key={config.id} class={config.itemClass}>
+                                        <a
+                                            href="#"
+                                            class="slds-nav-vertical__action"
+                                            data-id={config.id}
+                                            aria-current={config.isActive}
+                                            onclick={handleConfigurationSelect}
+                                        >
+                                            <span class="slds-truncate" title={config.name}>{config.name}</span>
+                                        </a>
+                                    </li>
+                                </template>
+                            </ul>
+                        </nav>
+                    </template>
+                    <template if:false={hasConfigurations}>
+                        <div class="slds-p-around_medium slds-text-align_center slds-text-color_weak">
+                            <lightning-icon icon-name="utility:open_folder" size="small" class="slds-m-bottom_x-small"></lightning-icon>
+                            <p class="slds-text-body_small">No saved configurations yet.</p>
+                            <p class="slds-text-body_small">Fill in the details on the right and click Save to create your first one.</p>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Detail panel: editor -->
+            <div class="slds-col slds-size_1-of-1 slds-medium-size_8-of-12 slds-large-size_9-of-12 ptf-detail">
+                <div class="slds-p-around_medium">
+                    <template if:true={showSetupBanner}>
+                        <div class="slds-notify slds-notify_alert slds-theme_alert-texture slds-theme_warning slds-m-bottom_medium" role="alert">
+                            <span class="slds-assistive-text">warning</span>
+                            <h2>{setupMessage}</h2>
+                            <template if:true={canAutoAssignPermissionSet}>
+                                <div class="slds-m-top_x-small">
+                                    <lightning-button
+                                        variant="brand"
+                                        label="Auto-assign setup permission set"
+                                        onclick={handleAutoAssignPermissionSet}
+                                    ></lightning-button>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Identity fields -->
+                    <div class="slds-grid slds-wrap slds-gutters slds-m-bottom_x-small">
+                        <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12">
+                            <lightning-input
+                                label="Configuration Name"
+                                value={configurationName}
+                                onchange={handleConfigurationNameChange}
+                                required
+                            ></lightning-input>
+                        </div>
+                        <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12">
+                            <lightning-input
+                                label="Invocable Action Label"
+                                value={invocableActionLabel}
+                                onchange={handleInvocableActionLabelChange}
+                                required
+                            ></lightning-input>
+                        </div>
+                    </div>
+                    <p class="slds-text-body_small slds-text-color_weak slds-m-bottom_medium">{parserClassHelpText}</p>
+
+                    <!-- Object adder -->
+                    <div class="slds-grid slds-gutters slds-grid_vertical-align-end slds-m-bottom_medium">
+                        <div class="slds-col slds-grow">
+                            <lightning-combobox
+                                label="Add an object"
+                                value={objectToAdd}
+                                options={objectOptions}
+                                onchange={handleObjectChange}
+                                placeholder="Search objects…"
+                            ></lightning-combobox>
+                        </div>
+                        <div class="slds-col slds-no-flex">
+                            <lightning-button
+                                variant="brand"
+                                label="Add"
+                                icon-name="utility:add"
+                                onclick={handleAddObject}
+                                disabled={disableAddObject}
+                            ></lightning-button>
+                        </div>
+                    </div>
+
+                    <!-- Objects as accordion (only one field selector visible at a time) -->
+                    <template if:true={hasSelectedObjects}>
+                        <lightning-accordion
+                            allow-multiple-sections-open="false"
+                            active-section-name={activeSection}
+                            onsectiontoggle={handleSectionToggle}
+                        >
+                            <template for:each={selectedObjects} for:item="objectConfig">
+                                <lightning-accordion-section
+                                    key={objectConfig.id}
+                                    name={objectConfig.sectionName}
+                                    label={objectConfig.label}
+                                >
+                                    <lightning-button-icon
+                                        slot="actions"
+                                        icon-name="utility:delete"
+                                        variant="border-filled"
+                                        alternative-text="Remove object"
+                                        title="Remove object"
+                                        data-id={objectConfig.id}
+                                        onclick={handleRemoveObject}
+                                    ></lightning-button-icon>
+
+                                    <div class="slds-grid slds-grid_align-spread slds-grid_vertical-align-center slds-m-bottom_x-small">
+                                        <span class="slds-badge">{objectConfig.selectedCount} fields selected</span>
+                                        <lightning-input
+                                            type="toggle"
+                                            label="Collection (array)"
+                                            message-toggle-active="Array"
+                                            message-toggle-inactive="Single record"
+                                            data-id={objectConfig.id}
+                                            checked={objectConfig.isCollection}
+                                            onchange={handleCollectionToggle}
+                                        ></lightning-input>
+                                    </div>
+
+                                    <template if:true={objectConfig.isLoading}>
+                                        <lightning-spinner size="small" alternative-text="Loading fields"></lightning-spinner>
+                                    </template>
+                                    <template if:false={objectConfig.isLoading}>
+                                        <lightning-dual-listbox
+                                            name="fields"
+                                            label="Fields"
+                                            source-label="Available"
+                                            selected-label="Selected"
+                                            options={objectConfig.fieldOptions}
+                                            value={objectConfig.selectedFields}
+                                            data-id={objectConfig.id}
+                                            onchange={handleFieldSelection}
+                                            size="6"
+                                        ></lightning-dual-listbox>
+                                    </template>
+                                </lightning-accordion-section>
+                            </template>
+                        </lightning-accordion>
+                    </template>
+
+                    <template if:false={hasSelectedObjects}>
+                        <div class="slds-box slds-box_x-small slds-text-align_center slds-text-color_weak slds-m-top_small">
+                            Add one or more objects above to start building your template.
+                        </div>
+                    </template>
+
+                    <!-- Collapsible JSON preview -->
+                    <div class="slds-m-top_medium">
+                        <lightning-button
+                            variant="base"
+                            label={previewToggleLabel}
+                            icon-name="utility:preview"
+                            onclick={togglePreview}
+                        ></lightning-button>
+                        <template if:true={showPreview}>
+                            <div class="slds-m-top_x-small">
+                                <lightning-textarea
+                                    label="Generated JSON"
+                                    value={jsonOutput}
+                                    readonly
+                                ></lightning-textarea>
+                                <div class="slds-m-top_x-small">
+                                    <lightning-button label="Copy Output" icon-name="utility:copy" onclick={handleCopyOutput}></lightning-button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <template if:true={isSaving}>
+            <div class="slds-is-relative ptf-saving">
+                <lightning-spinner size="medium" variant="brand" alternative-text="Saving configuration"></lightning-spinner>
+            </div>
+        </template>
+    </div>
+</template>

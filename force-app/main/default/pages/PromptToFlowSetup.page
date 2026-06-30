@@ -7,6 +7,19 @@
            lightningStylesheets="true">
     <apex:slds />
     <div class="slds-scope slds-p-around_large">
+        <apex:actionStatus id="ptfBusy">
+            <apex:facet name="start">
+                <div class="slds-spinner_container"
+                     style="position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999;">
+                    <div role="status" class="slds-spinner slds-spinner_large slds-spinner_brand">
+                        <span class="slds-assistive-text">Running setup, please wait</span>
+                        <div class="slds-spinner__dot-a"></div>
+                        <div class="slds-spinner__dot-b"></div>
+                    </div>
+                </div>
+            </apex:facet>
+        </apex:actionStatus>
+
         <div class="slds-text-heading_medium slds-m-bottom_medium">PromptToFlow Setup</div>
 
         <apex:outputPanel rendered="{!isReady}" layout="block"
@@ -31,9 +44,6 @@
                                         action="{!runSetup}"
                                         styleClass="slds-button slds-button_brand"
                                         status="ptfBusy" />
-                    <apex:actionStatus id="ptfBusy"
-                                       startText=" Working, this can take a few seconds..."
-                                       stopText="" />
                     <apex:outputPanel rendered="{!setupRan}" layout="block" styleClass="slds-m-top_small">
                         <apex:outputPanel rendered="{!setupSucceeded}" layout="block"
                             styleClass="slds-text-color_success">
@@ -59,7 +69,8 @@
             <div class="slds-m-top_medium">
                 <apex:commandButton value="Re-check Status"
                                     action="{!init}"
-                                    styleClass="slds-button slds-button_neutral" />
+                                    styleClass="slds-button slds-button_neutral"
+                                    status="ptfBusy" />
             </div>
         </apex:form>
     </div>

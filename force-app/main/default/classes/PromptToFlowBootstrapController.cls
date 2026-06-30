@@ -18,6 +18,7 @@ public with sharing class PromptToFlowBootstrapController {
     private static final String EXTERNAL_CREDENTIAL = 'PromptToFlow_Tooling_Cred';
     @TestVisible
     private static final String PRINCIPAL_NAME = 'PromptToFlow_Principal';
+    private static final String SETUP_PERMISSION_SET_API_NAME = 'PromptToFlow_User';
     private static final String SCOPES = 'refresh_token api';
     private static final String METADATA_API_VERSION = '60.0';
     private static final String REST_API_VERSION = 'v60.0';
@@ -56,6 +57,7 @@ public with sharing class PromptToFlowBootstrapController {
 
     // Invoked from the page's action attribute so the status callout is allowed.
     public PageReference init() {
+        this.externalCredentialUrl = resolveExternalCredentialUrl();
         refreshStatus();
         return null;
     }
@@ -66,7 +68,62 @@ public with sharing class PromptToFlowBootstrapController {
         this.setupSucceeded = result.success;
         this.setupMessage = result.message;
         refreshStatus();
+        // DML must come after all callouts above (Apex forbids callouts once there
+        // is uncommitted DML). Best-effort: grant the installing admin the access
+        // they need, since unlocked packages can't run a post-install script.
+        assignSetupPermissionSetToCurrentUser();
         return null;
+    }
+
+    // Deep-links straight to the packaged External Credential record so the admin
+    // can Authenticate without first navigating the Named Credentials list.
+    // ExternalCredential is not a SOQL-queryable SObject, so its Id is read via
+    // the Tooling API using the (API-enabled) Visualforce session.
+    private static String resolveExternalCredentialUrl() {
+        try {
+            String query =
+                'SELECT+Id+FROM+ExternalCredential+WHERE+DeveloperName=\'' + EXTERNAL_CREDENTIAL + '\'+LIMIT+1';
+            HttpResponse response =
+                httpGet(getMyDomainUrl() + '/services/data/' + REST_API_VERSION + '/tooling/query/?q=' + query);
+            if (response.getStatusCode() == 200) {
+                Map<String, Object> body = (Map<String, Object>) JSON.deserializeUntyped(response.getBody());
+                List<Object> records = (List<Object>) body.get('records');
+                if (records != null && !records.isEmpty()) {
+                    String ecId = (String) ((Map<String, Object>) records[0]).get('Id');
+                    if (String.isNotBlank(ecId)) {
+                        return '/lightning/setup/NamedCredential/ExternalCredential/' + ecId + '/view';
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Fall back to the Named Credentials home below.
+        }
+        return EXTERNAL_CREDENTIAL_URL;
+    }
+
+    private static void assignSetupPermissionSetToCurrentUser() {
+        try {
+            List<PermissionSet> permissionSets = [
+                SELECT Id FROM PermissionSet WHERE Name = :SETUP_PERMISSION_SET_API_NAME LIMIT 1
+            ];
+            if (permissionSets.isEmpty()) {
+                return;
+            }
+            Integer alreadyAssigned = [
+                SELECT COUNT()
+                FROM PermissionSetAssignment
+                WHERE AssigneeId = :UserInfo.getUserId()
+                AND PermissionSetId = :permissionSets[0].Id
+            ];
+            if (alreadyAssigned == 0) {
+                insert new PermissionSetAssignment(
+                    AssigneeId = UserInfo.getUserId(),
+                    PermissionSetId = permissionSets[0].Id
+                );
+            }
+        } catch (Exception ignored) {
+            // Best-effort; the admin can still assign the permission set manually.
+        }
     }
 
     private void refreshStatus() {
