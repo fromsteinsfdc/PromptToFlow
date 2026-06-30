@@ -23,6 +23,15 @@
                 <div class="slds-page-header__col-actions">
                     <div class="slds-page-header__controls">
                         <div class="slds-page-header__control">
+                            <lightning-button
+                                label="Delete"
+                                icon-name="utility:delete"
+                                variant="destructive-text"
+                                onclick={handleDeleteConfiguration}
+                                disabled={isDeleteDisabled}
+                            ></lightning-button>
+                        </div>
+                        <div class="slds-page-header__control">
                             <lightning-button-menu
                                 alternative-text="Open saved configuration"
                                 label="Open"

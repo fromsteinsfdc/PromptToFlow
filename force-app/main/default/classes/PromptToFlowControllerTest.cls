@@ -361,6 +361,37 @@ private class PromptToFlowControllerTest {
     }
 
     @IsTest
+    static void deleteConfiguration_removesRecord() {
+        PromptToFlow_Config__c cfg = new PromptToFlow_Config__c(
+            Name = 'Delete Me Config',
+            Configuration_JSON__c = '[{"apiName":"Account","isCollection":true,"selectedFields":["Name"]}]',
+            Invocable_Action_Label__c = 'Delete Me'
+        );
+        insert cfg;
+
+        Test.startTest();
+        PromptToFlowController.deleteConfiguration(cfg.Id);
+        Test.stopTest();
+
+        System.assertEquals(
+            0,
+            [SELECT COUNT() FROM PromptToFlow_Config__c WHERE Id = :cfg.Id],
+            'Configuration record should be deleted.'
+        );
+    }
+
+    @IsTest
+    static void deleteConfiguration_nullIdThrows() {
+        Boolean threw = false;
+        try {
+            PromptToFlowController.deleteConfiguration(null);
+        } catch (AuraHandledException e) {
+            threw = true;
+        }
+        System.assertEquals(true, threw, 'A null configuration Id should surface an error.');
+    }
+
+    @IsTest
     static void saveConfiguration_validatesRequiredFields() {
         Boolean threw = false;
         try {

@@ -219,6 +219,26 @@ public with sharing class PromptToFlowController {
     }
 
     @AuraEnabled
+    public static void deleteConfiguration(Id configurationId) {
+        if (configurationId == null) {
+            throw new AuraHandledException('Configuration Id is required.');
+        }
+        List<PromptToFlow_Config__c> records = [
+            SELECT Id
+            FROM PromptToFlow_Config__c
+            WHERE Id = :configurationId
+            LIMIT 1
+        ];
+        if (records.isEmpty()) {
+            throw new AuraHandledException('Configuration not found. It may have already been deleted.');
+        }
+        // Note: the generated parser Apex class is intentionally left in place
+        // because Flows may still reference it; deleting the config only removes
+        // the saved builder configuration record.
+        delete records;
+    }
+
+    @AuraEnabled
     public static String getInvocableParserSource(String parserClassName, String configurationJson, String invocableActionLabel) {
         if (String.isBlank(parserClassName)) {
             throw new AuraHandledException('Parser class name is required.');

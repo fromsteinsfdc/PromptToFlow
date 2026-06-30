@@ -7,6 +7,7 @@ import getFieldsForObject from '@salesforce/apex/PromptToFlowController.getField
 import getConfigurations from '@salesforce/apex/PromptToFlowController.getConfigurations';
 import getConfiguration from '@salesforce/apex/PromptToFlowController.getConfiguration';
 import saveConfiguration from '@salesforce/apex/PromptToFlowController.saveConfiguration';
+import deleteConfiguration from '@salesforce/apex/PromptToFlowController.deleteConfiguration';
 import generateParserForConfiguration from '@salesforce/apex/PromptToFlowController.generateParserForConfiguration';
 import getParserGenerationSetupStatus from '@salesforce/apex/PromptToFlowController.getParserGenerationSetupStatus';
 import assignSetupPermissionSetToCurrentUser from '@salesforce/apex/PromptToFlowController.assignSetupPermissionSetToCurrentUser';
@@ -57,6 +58,10 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
     // ----- Derived state -----
     get isBusy() {
         return this.isSaving || this.isLoadingConfig;
+    }
+
+    get isDeleteDisabled() {
+        return !this.selectedConfigurationId || this.isBusy;
     }
 
     get hasSelectedObjects() {
@@ -341,6 +346,34 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             return;
         }
         this.resetForm();
+    }
+
+    async handleDeleteConfiguration() {
+        if (!this.selectedConfigurationId) {
+            return;
+        }
+        const name = this.configurationName || 'this configuration';
+        const confirmed = await LightningConfirm.open({
+            message: `Delete “${name}”? This permanently removes the saved configuration and can't be undone. The generated parser Apex class is left in place.`,
+            label: 'Delete configuration?',
+            theme: 'error',
+            variant: 'header'
+        });
+        if (!confirmed) {
+            return;
+        }
+
+        this.isSaving = true;
+        try {
+            await deleteConfiguration({ configurationId: this.selectedConfigurationId });
+            await refreshApex(this.wiredConfigurationsResult);
+            this.resetForm();
+            this.showToast('Deleted', 'Configuration deleted.', 'success');
+        } catch (error) {
+            this.showError('Unable to delete configuration', error);
+        } finally {
+            this.isSaving = false;
+        }
     }
 
     resetForm() {
