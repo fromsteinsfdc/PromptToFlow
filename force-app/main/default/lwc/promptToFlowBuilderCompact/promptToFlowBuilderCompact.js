@@ -1,4 +1,5 @@
-import { LightningElement, track } from 'lwc';
+import { LightningElement, track, wire } from 'lwc';
+import { refreshApex } from '@salesforce/apex';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import LightningConfirm from 'lightning/confirm';
 import getAvailableObjects from '@salesforce/apex/PromptToFlowController.getAvailableObjects';
@@ -35,7 +36,22 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
     }
 
     async initialize() {
-        await Promise.all([this.loadObjects(), this.loadConfigurations(), this.loadSetupStatus()]);
+        await Promise.all([this.loadObjects(), this.loadSetupStatus()]);
+    }
+
+    @wire(getConfigurations)
+    wiredConfigurations(result) {
+        this.wiredConfigurationsResult = result;
+        if (result.data) {
+            this.configurations = result.data.map((item) => ({
+                id: item.id,
+                name: item.name
+            }));
+            this.configsLoaded = true;
+        } else if (result.error) {
+            this.configsLoaded = true;
+            this.showError('Unable to load configurations', result.error);
+        }
     }
 
     // ----- Derived state -----
@@ -167,19 +183,6 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
         }
     }
 
-    async loadConfigurations() {
-        try {
-            const configs = await getConfigurations();
-            this.configurations = configs.map((item) => ({
-                id: item.id,
-                name: item.name
-            }));
-        } catch (error) {
-            this.showError('Unable to load configurations', error);
-        } finally {
-            this.configsLoaded = true;
-        }
-    }
 
     async loadSetupStatus() {
         try {
@@ -365,7 +368,7 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
                 await generateParserForConfiguration({ configurationId: saved.id });
             }
 
-            await Promise.all([this.loadConfigurations(), this.loadSetupStatus()]);
+            await Promise.all([refreshApex(this.wiredConfigurationsResult), this.loadSetupStatus()]);
             this.isDirty = false;
             this.showToast('Saved', 'Configuration saved successfully.', 'success');
         } catch (error) {
