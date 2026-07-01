@@ -83,7 +83,7 @@ export default class PromptToFlowBuilderWorkspace extends LightningElement {
             return 'A parser Apex class will be generated automatically from the action label.';
         }
         return this.parserClassNameLocked
-            ? `Parser class: ${name} (locked after first save)`
+            ? `Parser class: ${name} (locked now that the class is generated)`
             : `Parser class will be generated as: ${name}`;
     }
 

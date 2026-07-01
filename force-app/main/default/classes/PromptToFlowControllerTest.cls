@@ -137,7 +137,8 @@ private class PromptToFlowControllerTest {
         System.assertEquals(configJson, loaded.configurationJson);
         System.assertEquals('Generated Parser Demo', loaded.invocableActionLabel);
         System.assertEquals('Generated_Parser_Demo', loaded.parserClassName);
-        System.assertEquals(true, loaded.parserClassNameLocked);
+        // The parser Apex class has not been generated, so the name is not locked.
+        System.assertEquals(false, loaded.parserClassNameLocked);
         System.assertEquals(true, allConfigs.size() > 0);
     }
 
@@ -272,7 +273,7 @@ private class PromptToFlowControllerTest {
     }
 
     @IsTest
-    static void saveConfiguration_updateKeepsExistingParserClassName() {
+    static void saveConfiguration_updateReDerivesClassNameUntilGenerated() {
         String configJson = JSON.serialize(new List<Object>{
             new Map<String, Object>{
                 'apiName' => 'Account',
@@ -281,7 +282,6 @@ private class PromptToFlowControllerTest {
             }
         });
 
-        Test.setMock(HttpCalloutMock.class, new ToolingApiMock());
         PromptToFlowController.ConfigurationRecordDto firstSave = PromptToFlowController.saveConfiguration(
             null,
             'Update Lock Config',
@@ -290,7 +290,11 @@ private class PromptToFlowControllerTest {
             'Initial Label',
             false
         );
+        System.assertEquals('Initial_Label', firstSave.parserClassName);
+        System.assertEquals(false, firstSave.parserClassNameLocked, 'No class generated yet.');
 
+        // The parser class was never generated, so updating the label re-derives
+        // the class name to keep it in sync.
         PromptToFlowController.ConfigurationRecordDto updatedSave = PromptToFlowController.saveConfiguration(
             firstSave.id,
             'Update Lock Config',
@@ -300,8 +304,56 @@ private class PromptToFlowControllerTest {
             false
         );
 
-        System.assertEquals('Initial_Label', updatedSave.parserClassName);
+        System.assertEquals('Changed_Label', updatedSave.parserClassName);
         System.assertEquals('Changed Label', updatedSave.invocableActionLabel);
+    }
+
+    @IsTest
+    static void saveConfiguration_keepsClassNameOnceClassExists() {
+        String configJson = JSON.serialize(new List<Object>{
+            new Map<String, Object>{
+                'apiName' => 'Account',
+                'isCollection' => true,
+                'selectedFields' => new List<String>{ 'Name' }
+            }
+        });
+
+        PromptToFlowController.ConfigurationRecordDto firstSave = PromptToFlowController.saveConfiguration(
+            null,
+            'Keep Lock Config',
+            configJson,
+            '{"Account":[{"Name":"string"}]}',
+            'Some Label',
+            false
+        );
+
+        // Simulate a generated parser class by pointing the record at a real,
+        // existing Apex class name (this test class). The existence check is
+        // SOQL against ApexClass, so it will see it as generated.
+        PromptToFlow_Config__c stored = [
+            SELECT Id, Parser_Class_Name__c
+            FROM PromptToFlow_Config__c
+            WHERE Id = :firstSave.id
+            LIMIT 1
+        ];
+        stored.Parser_Class_Name__c = 'PromptToFlowController';
+        update stored;
+
+        PromptToFlowController.ConfigurationRecordDto updatedSave = PromptToFlowController.saveConfiguration(
+            firstSave.id,
+            'Keep Lock Config',
+            configJson,
+            '{"Account":[{"Name":"string"}]}',
+            'A Totally Different Label',
+            false
+        );
+
+        System.assertEquals(
+            'PromptToFlowController',
+            updatedSave.parserClassName,
+            'Once the Apex class exists the name must not be re-derived.'
+        );
+        System.assertEquals(true, updatedSave.parserClassNameLocked);
     }
 
     @IsTest

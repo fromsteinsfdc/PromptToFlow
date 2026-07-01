@@ -142,12 +142,20 @@ public with sharing class PromptToFlowController {
     @AuraEnabled(cacheable=true)
     public static List<ConfigurationRecordDto> getConfigurations() {
         List<ConfigurationRecordDto> result = new List<ConfigurationRecordDto>();
-        for (PromptToFlow_Config__c recordItem : [
+        List<PromptToFlow_Config__c> records = [
             SELECT Id, Name, Configuration_JSON__c, Template_JSON__c, Invocable_Action_Label__c, Parser_Class_Name__c, Generate_Parser_On_Save__c, LastModifiedDate
             FROM PromptToFlow_Config__c
             ORDER BY LastModifiedDate DESC
-        ]) {
-            result.add(toDto(recordItem));
+        ];
+        Set<String> candidateClassNames = new Set<String>();
+        for (PromptToFlow_Config__c recordItem : records) {
+            if (String.isNotBlank(recordItem.Parser_Class_Name__c)) {
+                candidateClassNames.add(recordItem.Parser_Class_Name__c);
+            }
+        }
+        Set<String> existingClassNames = existingApexClassNames(candidateClassNames);
+        for (PromptToFlow_Config__c recordItem : records) {
+            result.add(toDto(recordItem, existingClassNames));
         }
         return result;
     }
@@ -190,12 +198,6 @@ public with sharing class PromptToFlowController {
         Boolean isInsert = configurationId == null;
         if (isInsert) {
             recordItem = new PromptToFlow_Config__c();
-            // The parser class name is derived once, on insert, and then left
-            // untouched on updates. Once a class is generated, Flows may
-            // reference it by name, so renaming it later would break them.
-            String derivedClassName = deriveClassNameFromActionLabel(sanitizedActionLabel);
-            ensureApexClassNameAvailable(derivedClassName);
-            recordItem.Parser_Class_Name__c = derivedClassName;
         } else {
             recordItem = [
                 SELECT Id, Parser_Class_Name__c
@@ -203,6 +205,19 @@ public with sharing class PromptToFlowController {
                 WHERE Id = :configurationId
                 LIMIT 1
             ];
+        }
+
+        // Keep the parser class name in sync with the label until the parser
+        // class has actually been generated. Once a real Apex class exists,
+        // Flows may reference it by name, so we stop re-deriving to avoid
+        // breaking those references. The existence check is SOQL (not a Tooling
+        // callout), so it is safe to run in the same transaction as the upsert.
+        Boolean classAlreadyGenerated = !String.isBlank(recordItem.Parser_Class_Name__c)
+            && apexClassExists(recordItem.Parser_Class_Name__c);
+        if (!classAlreadyGenerated) {
+            String derivedClassName = deriveClassNameFromActionLabel(sanitizedActionLabel);
+            ensureApexClassNameAvailable(derivedClassName);
+            recordItem.Parser_Class_Name__c = derivedClassName;
         }
 
         recordItem.Name = configurationName.trim();
@@ -344,6 +359,18 @@ public with sharing class PromptToFlowController {
     }
 
     private static ConfigurationRecordDto toDto(PromptToFlow_Config__c recordItem) {
+        Set<String> existingClassNames = String.isBlank(recordItem.Parser_Class_Name__c)
+            ? new Set<String>()
+            : existingApexClassNames(new Set<String>{ recordItem.Parser_Class_Name__c });
+        return toDto(recordItem, existingClassNames);
+    }
+
+    // Bulk-safe overload: callers that map many records pass a pre-computed set
+    // of existing Apex class names so we don't issue one SOQL query per record.
+    private static ConfigurationRecordDto toDto(
+        PromptToFlow_Config__c recordItem,
+        Set<String> existingClassNames
+    ) {
         ConfigurationRecordDto dto = new ConfigurationRecordDto();
         dto.id = recordItem.Id;
         dto.name = recordItem.Name;
@@ -351,7 +378,10 @@ public with sharing class PromptToFlowController {
         dto.templateJson = recordItem.Template_JSON__c;
         dto.invocableActionLabel = recordItem.Invocable_Action_Label__c;
         dto.parserClassName = recordItem.Parser_Class_Name__c;
-        dto.parserClassNameLocked = !String.isBlank(recordItem.Parser_Class_Name__c);
+        // "Locked" now means the parser Apex class actually exists; until then
+        // the name still tracks the invocable action label.
+        dto.parserClassNameLocked = !String.isBlank(recordItem.Parser_Class_Name__c)
+            && existingClassNames.contains(recordItem.Parser_Class_Name__c);
         dto.generateParserOnSave = recordItem.Generate_Parser_On_Save__c;
         dto.lastModifiedDate = recordItem.LastModifiedDate;
         return dto;
@@ -522,13 +552,34 @@ public with sharing class PromptToFlowController {
     }
 
     private static void ensureApexClassNameAvailable(String className) {
-        String existingClassId = findApexClassIdByName(className);
-        if (existingClassId != null) {
+        if (apexClassExists(className)) {
             throw new AuraHandledException(
                 'An Apex class named "' + className + '" already exists. ' +
                 'Choose a different invocable action label.'
             );
         }
+    }
+
+    // Existence checks use SOQL against ApexClass rather than a Tooling API
+    // callout so they can run in the same transaction as DML (e.g. the upsert
+    // in saveConfiguration). The Tooling API is still used for create/update
+    // of Apex classes, which genuinely require it.
+    private static Boolean apexClassExists(String className) {
+        if (String.isBlank(className)) {
+            return false;
+        }
+        return existingApexClassNames(new Set<String>{ className }).contains(className);
+    }
+
+    private static Set<String> existingApexClassNames(Set<String> candidateNames) {
+        Set<String> found = new Set<String>();
+        if (candidateNames == null || candidateNames.isEmpty()) {
+            return found;
+        }
+        for (ApexClass cls : [SELECT Name FROM ApexClass WHERE Name IN :candidateNames]) {
+            found.add(cls.Name);
+        }
+        return found;
     }
 
     private static void upsertApexClass(String className, String classBody) {
