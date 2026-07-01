@@ -119,7 +119,9 @@
                         label="Invocable Action Label"
                         value={invocableActionLabel}
                         onchange={handleInvocableActionLabelChange}
-                        field-level-help="This is the label of the Flow action you will call to parse the JSON output from the prompt template into objects the Flow can use"
+                        max-length={maxActionLabelLength}
+                        message-when-too-long="Keep the label to 40 characters or fewer."
+                        field-level-help="This is the label of the Flow action you will call to parse the JSON output from the prompt template into objects the Flow can use. It also becomes the generated Apex parser class name, so it is limited to 40 characters."
                         required
                     ></lightning-input>
                 </div>
@@ -290,18 +292,24 @@
 
             <!-- Collapsible JSON preview -->
             <div class="slds-m-top_medium">
-                <lightning-button
-                    variant="base"
-                    label={previewToggleLabel}
-                    icon-name="utility:preview"
-                    onclick={togglePreview}
-                ></lightning-button>
+                <div class="slds-grid slds-grid_vertical-align-center">
+                    <lightning-button
+                        variant="base"
+                        label={previewToggleLabel}
+                        icon-name="utility:preview"
+                        onclick={togglePreview}
+                    ></lightning-button>
+                    <lightning-button
+                        class="slds-m-left_large"
+                        variant="base"
+                        label="Copy Output"
+                        icon-name="utility:copy"
+                        onclick={handleCopyOutput}
+                    ></lightning-button>
+                </div>
                 <template if:true={showPreview}>
                     <div class="slds-m-top_x-small">
                         <lightning-textarea label="Generated JSON" value={jsonOutput} readonly></lightning-textarea>
-                        <div class="slds-m-top_x-small">
-                            <lightning-button label="Copy Output" icon-name="utility:copy" onclick={handleCopyOutput}></lightning-button>
-                        </div>
                     </div>
                 </template>
             </div>

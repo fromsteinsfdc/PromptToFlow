@@ -32,3 +32,6 @@ node_modules/
 
 # Legacy Connected App approach, replaced by External Client App (ECA). Kept out of source.
 **/connectedApps/**
+
+# Superseded retriever flow built with the wrong process type. Kept for reference only; excluded from deploy + retrieve.
+**/flows/PromptToFlow_JSON_Template_Retriever_OLD.flow-meta.xml

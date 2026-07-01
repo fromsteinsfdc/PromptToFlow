@@ -12,6 +12,10 @@ import generateParserForConfiguration from '@salesforce/apex/PromptToFlowControl
 import getParserGenerationSetupStatus from '@salesforce/apex/PromptToFlowController.getParserGenerationSetupStatus';
 import assignSetupPermissionSetToCurrentUser from '@salesforce/apex/PromptToFlowController.assignSetupPermissionSetToCurrentUser';
 
+// Apex class names (identifiers) cannot exceed 40 characters, and the action
+// label is sanitized 1:1 into the generated parser class name.
+const MAX_ACTION_LABEL_LENGTH = 40;
+
 export default class PromptToFlowBuilderCompact extends LightningElement {
     @track objectOptions = [];
     @track configurations = [];
@@ -319,11 +323,15 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
         this.isDirty = true;
     }
 
+    get maxActionLabelLength() {
+        return MAX_ACTION_LABEL_LENGTH;
+    }
+
     handleConfigurationNameBlur() {
         const name = (this.configurationName || '').trim();
         const label = (this.invocableActionLabel || '').trim();
         if (name && !label) {
-            this.invocableActionLabel = `Parse ${name}`;
+            this.invocableActionLabel = `Parse ${name}`.slice(0, MAX_ACTION_LABEL_LENGTH);
             this.isDirty = true;
         }
     }
@@ -395,6 +403,14 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
         }
         if (!this.invocableActionLabel) {
             this.showToast('Validation', 'Invocable action label is required.', 'warning');
+            return;
+        }
+        if (this.toSafeClassName(this.invocableActionLabel).length > MAX_ACTION_LABEL_LENGTH) {
+            this.showToast(
+                'Validation',
+                `The invocable action label is too long. It becomes the parser Apex class name, which is limited to ${MAX_ACTION_LABEL_LENGTH} characters.`,
+                'warning'
+            );
             return;
         }
         if (this.selectedObjects.length === 0) {
