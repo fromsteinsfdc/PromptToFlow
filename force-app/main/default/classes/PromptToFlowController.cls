@@ -190,6 +190,12 @@ public with sharing class PromptToFlowController {
         Boolean isInsert = configurationId == null;
         if (isInsert) {
             recordItem = new PromptToFlow_Config__c();
+            // The parser class name is derived once, on insert, and then left
+            // untouched on updates. Once a class is generated, Flows may
+            // reference it by name, so renaming it later would break them.
+            String derivedClassName = deriveClassNameFromActionLabel(sanitizedActionLabel);
+            ensureApexClassNameAvailable(derivedClassName);
+            recordItem.Parser_Class_Name__c = derivedClassName;
         } else {
             recordItem = [
                 SELECT Id, Parser_Class_Name__c
@@ -197,19 +203,6 @@ public with sharing class PromptToFlowController {
                 WHERE Id = :configurationId
                 LIMIT 1
             ];
-        }
-
-        // (Re)derive the parser class name whenever a class has not actually
-        // been generated yet. Once the class exists (and may be referenced by
-        // Flows) we keep the saved name so those references don't break. This
-        // also lets a user recover from a failed generation by shortening the
-        // label, since the stored name is not locked until the class is real.
-        Boolean classAlreadyGenerated = !String.isBlank(recordItem.Parser_Class_Name__c)
-            && findApexClassIdByName(recordItem.Parser_Class_Name__c) != null;
-        if (!classAlreadyGenerated) {
-            String derivedClassName = deriveClassNameFromActionLabel(sanitizedActionLabel);
-            ensureApexClassNameAvailable(derivedClassName);
-            recordItem.Parser_Class_Name__c = derivedClassName;
         }
 
         recordItem.Name = configurationName.trim();

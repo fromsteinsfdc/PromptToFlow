@@ -33,22 +33,6 @@
         </assignmentItems>
     </assignments>
     <assignments>
-        <name>Set_config_from_ID</name>
-        <label>Set config from ID</label>
-        <locationX>0</locationX>
-        <locationY>0</locationY>
-        <assignmentItems>
-            <assignToReference>ptfConfigRecord</assignToReference>
-            <operator>Assign</operator>
-            <value>
-                <elementReference>Get_config_by_ID</elementReference>
-            </value>
-        </assignmentItems>
-        <connector>
-            <targetReference>Was_record_passed_in_found</targetReference>
-        </connector>
-    </assignments>
-    <assignments>
         <name>Set_config_from_name</name>
         <label>Set config from name</label>
         <locationX>0</locationX>
@@ -115,21 +99,6 @@
             <label>Record variable</label>
         </rules>
         <rules>
-            <name>Record_ID</name>
-            <conditionLogic>and</conditionLogic>
-            <conditions>
-                <leftValueReference>configRecordId</leftValueReference>
-                <operator>IsBlank</operator>
-                <rightValue>
-                    <booleanValue>false</booleanValue>
-                </rightValue>
-            </conditions>
-            <connector>
-                <targetReference>Get_config_by_ID</targetReference>
-            </connector>
-            <label>Record ID</label>
-        </rules>
-        <rules>
             <name>Record_name</name>
             <conditionLogic>and</conditionLogic>
             <conditions>
@@ -169,27 +138,6 @@
     </processMetadataValues>
     <processType>PromptFlow</processType>
     <recordLookups>
-        <name>Get_config_by_ID</name>
-        <label>Get config by ID</label>
-        <locationX>0</locationX>
-        <locationY>0</locationY>
-        <assignNullValuesIfNoRecordsFound>false</assignNullValuesIfNoRecordsFound>
-        <connector>
-            <targetReference>Set_config_from_ID</targetReference>
-        </connector>
-        <filterLogic>and</filterLogic>
-        <filters>
-            <field>Id</field>
-            <operator>EqualTo</operator>
-            <value>
-                <elementReference>configRecordId</elementReference>
-            </value>
-        </filters>
-        <getFirstRecordOnly>true</getFirstRecordOnly>
-        <object>PromptToFlow_Config__c</object>
-        <storeOutputAutomatically>true</storeOutputAutomatically>
-    </recordLookups>
-    <recordLookups>
         <name>Get_config_by_Name</name>
         <label>Get config by Name</label>
         <locationX>0</locationX>
@@ -219,14 +167,6 @@
         <triggerType>Capability</triggerType>
     </start>
     <status>Active</status>
-    <variables>
-        <description>Populate this value to search for a PromptToFlow Configuration record by Id.</description>
-        <name>configRecordId</name>
-        <dataType>String</dataType>
-        <isCollection>false</isCollection>
-        <isInput>true</isInput>
-        <isOutput>false</isOutput>
-    </variables>
     <variables>
         <description>Populate this value to search for a PromptToFlow Configuration record by Name.</description>
         <name>configRecordName</name>
