@@ -1,6 +1,12 @@
 public with sharing class PromptToFlowController {
     private static final String TOOLING_NAMED_CREDENTIAL = 'PromptToFlow_Tooling';
     private static final String SETUP_PERMISSION_SET_API_NAME = 'PromptToFlow_User';
+    // The SOAP Metadata API references CMDT records as
+    // "<TypeNameWithout__mdt>.<DeveloperName>".
+    private static final String CONFIG_MDT_FULLNAME_PREFIX = 'PromptToFlow_Configuration.';
+    // MasterLabel / DeveloperName on custom metadata records are limited to 40
+    // characters, so configuration names share that ceiling.
+    private static final Integer MAX_CONFIG_NAME_LENGTH = 40;
     public class ObjectOption {
         @AuraEnabled public String label;
         @AuraEnabled public String pluralLabel;
@@ -29,6 +35,7 @@ public with sharing class PromptToFlowController {
 
     public class ConfigurationRecordDto {
         @AuraEnabled public Id id;
+        @AuraEnabled public String developerName;
         @AuraEnabled public String name;
         @AuraEnabled public String configurationJson;
         @AuraEnabled public String templateJson;
@@ -36,7 +43,6 @@ public with sharing class PromptToFlowController {
         @AuraEnabled public String parserClassName;
         @AuraEnabled public Boolean parserClassNameLocked;
         @AuraEnabled public Boolean generateParserOnSave;
-        @AuraEnabled public Datetime lastModifiedDate;
     }
 
     public class ParserGenerationSetupStatusDto {
@@ -142,19 +148,21 @@ public with sharing class PromptToFlowController {
     @AuraEnabled(cacheable=true)
     public static List<ConfigurationRecordDto> getConfigurations() {
         List<ConfigurationRecordDto> result = new List<ConfigurationRecordDto>();
-        List<PromptToFlow_Config__c> records = [
-            SELECT Id, Name, Configuration_JSON__c, Template_JSON__c, Invocable_Action_Label__c, Parser_Class_Name__c, Generate_Parser_On_Save__c, LastModifiedDate
-            FROM PromptToFlow_Config__c
-            ORDER BY LastModifiedDate DESC
+        // SOQL (not getAll()) so the LongTextArea JSON fields return in full;
+        // getAll()/getInstance() truncate custom metadata fields at 255 chars.
+        List<PromptToFlow_Configuration__mdt> records = [
+            SELECT Id, DeveloperName, MasterLabel, Configuration_JSON__c, Template_JSON__c, Invocable_Action_Label__c, Parser_Class_Name__c, Generate_Parser_On_Save__c
+            FROM PromptToFlow_Configuration__mdt
+            ORDER BY MasterLabel ASC
         ];
         Set<String> candidateClassNames = new Set<String>();
-        for (PromptToFlow_Config__c recordItem : records) {
+        for (PromptToFlow_Configuration__mdt recordItem : records) {
             if (String.isNotBlank(recordItem.Parser_Class_Name__c)) {
                 candidateClassNames.add(recordItem.Parser_Class_Name__c);
             }
         }
         Set<String> existingClassNames = existingApexClassNames(candidateClassNames);
-        for (PromptToFlow_Config__c recordItem : records) {
+        for (PromptToFlow_Configuration__mdt recordItem : records) {
             result.add(toDto(recordItem, existingClassNames));
         }
         return result;
@@ -162,9 +170,9 @@ public with sharing class PromptToFlowController {
 
     @AuraEnabled(cacheable=true)
     public static ConfigurationRecordDto getConfiguration(Id configurationId) {
-        PromptToFlow_Config__c recordItem = [
-            SELECT Id, Name, Configuration_JSON__c, Template_JSON__c, Invocable_Action_Label__c, Parser_Class_Name__c, Generate_Parser_On_Save__c, LastModifiedDate
-            FROM PromptToFlow_Config__c
+        PromptToFlow_Configuration__mdt recordItem = [
+            SELECT Id, DeveloperName, MasterLabel, Configuration_JSON__c, Template_JSON__c, Invocable_Action_Label__c, Parser_Class_Name__c, Generate_Parser_On_Save__c
+            FROM PromptToFlow_Configuration__mdt
             WHERE Id = :configurationId
             LIMIT 1
         ];
@@ -194,46 +202,73 @@ public with sharing class PromptToFlowController {
         }
 
         String sanitizedActionLabel = invocableActionLabel.trim();
-        PromptToFlow_Config__c recordItem;
-        Boolean isInsert = configurationId == null;
-        if (isInsert) {
-            recordItem = new PromptToFlow_Config__c();
+        String sanitizedName = configurationName.trim();
+        if (sanitizedName.length() > MAX_CONFIG_NAME_LENGTH) {
+            throw new AuraHandledException(
+                'Configuration name is too long. Custom metadata labels are limited to ' +
+                MAX_CONFIG_NAME_LENGTH + ' characters.'
+            );
+        }
+
+        // Resolve the target record's stable key (DeveloperName) and any parser
+        // class name already recorded. DeveloperName is immutable once created,
+        // so updates reuse the existing one while renames only change the label.
+        String developerName;
+        String existingParserClassName;
+        if (configurationId == null) {
+            developerName = deriveUniqueDeveloperName(sanitizedName);
         } else {
-            recordItem = [
-                SELECT Id, Parser_Class_Name__c
-                FROM PromptToFlow_Config__c
+            List<PromptToFlow_Configuration__mdt> existing = [
+                SELECT Id, DeveloperName, Parser_Class_Name__c
+                FROM PromptToFlow_Configuration__mdt
                 WHERE Id = :configurationId
                 LIMIT 1
             ];
+            if (existing.isEmpty()) {
+                throw new AuraHandledException('Configuration not found. It may have already been deleted.');
+            }
+            developerName = existing[0].DeveloperName;
+            existingParserClassName = existing[0].Parser_Class_Name__c;
         }
 
         // Keep the parser class name in sync with the label until the parser
         // class has actually been generated. Once a real Apex class exists,
         // Flows may reference it by name, so we stop re-deriving to avoid
-        // breaking those references. The existence check is SOQL (not a Tooling
-        // callout), so it is safe to run in the same transaction as the upsert.
-        Boolean classAlreadyGenerated = !String.isBlank(recordItem.Parser_Class_Name__c)
-            && apexClassExists(recordItem.Parser_Class_Name__c);
+        // breaking those references. Existence is checked with SOQL against
+        // ApexClass, which is safe alongside the metadata callout.
+        String parserClassName = existingParserClassName;
+        Boolean classAlreadyGenerated = !String.isBlank(parserClassName) && apexClassExists(parserClassName);
         if (!classAlreadyGenerated) {
             String derivedClassName = deriveClassNameFromActionLabel(sanitizedActionLabel);
             ensureApexClassNameAvailable(derivedClassName);
-            recordItem.Parser_Class_Name__c = derivedClassName;
+            parserClassName = derivedClassName;
         }
 
-        recordItem.Name = configurationName.trim();
-        recordItem.Configuration_JSON__c = configurationJson;
-        recordItem.Template_JSON__c = templateJson;
-        recordItem.Invocable_Action_Label__c = sanitizedActionLabel;
-        recordItem.Generate_Parser_On_Save__c = generateParserOnSave == true;
-        upsert recordItem;
+        Map<String, Object> fieldValues = new Map<String, Object>{
+            'Configuration_JSON__c' => configurationJson,
+            'Template_JSON__c' => templateJson,
+            'Invocable_Action_Label__c' => sanitizedActionLabel,
+            'Parser_Class_Name__c' => parserClassName,
+            'Generate_Parser_On_Save__c' => (generateParserOnSave == true)
+        };
+        // Custom metadata records can't be written with DML; the synchronous
+        // SOAP Metadata API upsert commits before returning, so the record is
+        // queryable immediately afterward.
+        upsertConfigMetadata(developerName, sanitizedName, fieldValues);
 
-        PromptToFlow_Config__c refreshedRecord = [
-            SELECT Id, Name, Configuration_JSON__c, Template_JSON__c, Invocable_Action_Label__c, Parser_Class_Name__c, Generate_Parser_On_Save__c, LastModifiedDate
-            FROM PromptToFlow_Config__c
-            WHERE Id = :recordItem.Id
+        List<PromptToFlow_Configuration__mdt> refreshed = [
+            SELECT Id, DeveloperName, MasterLabel, Configuration_JSON__c, Template_JSON__c, Invocable_Action_Label__c, Parser_Class_Name__c, Generate_Parser_On_Save__c
+            FROM PromptToFlow_Configuration__mdt
+            WHERE DeveloperName = :developerName
             LIMIT 1
         ];
-        return toDto(refreshedRecord);
+        if (refreshed.isEmpty()) {
+            throw new AuraHandledException(
+                'Configuration "' + sanitizedName + '" was submitted, but is not yet available to read back. ' +
+                'Refresh the list in a moment.'
+            );
+        }
+        return toDto(refreshed[0]);
     }
 
     @AuraEnabled
@@ -241,9 +276,9 @@ public with sharing class PromptToFlowController {
         if (configurationId == null) {
             throw new AuraHandledException('Configuration Id is required.');
         }
-        List<PromptToFlow_Config__c> records = [
-            SELECT Id
-            FROM PromptToFlow_Config__c
+        List<PromptToFlow_Configuration__mdt> records = [
+            SELECT Id, DeveloperName
+            FROM PromptToFlow_Configuration__mdt
             WHERE Id = :configurationId
             LIMIT 1
         ];
@@ -252,8 +287,10 @@ public with sharing class PromptToFlowController {
         }
         // Note: the generated parser Apex class is intentionally left in place
         // because Flows may still reference it; deleting the config only removes
-        // the saved builder configuration record.
-        delete records;
+        // the saved builder configuration record. Custom metadata records can't
+        // be deleted with DML or the Apex Metadata API, so this uses the
+        // synchronous SOAP Metadata API deleteMetadata call.
+        deleteConfigMetadata(new List<String>{ CONFIG_MDT_FULLNAME_PREFIX + records[0].DeveloperName });
     }
 
     @AuraEnabled
@@ -275,12 +312,20 @@ public with sharing class PromptToFlowController {
         if (configurationId == null) {
             throw new AuraHandledException('Configuration Id is required.');
         }
-        PromptToFlow_Config__c recordItem = [
+        PromptToFlow_Configuration__mdt recordItem = [
             SELECT Id, Configuration_JSON__c, Parser_Class_Name__c, Invocable_Action_Label__c, Generate_Parser_On_Save__c
-            FROM PromptToFlow_Config__c
+            FROM PromptToFlow_Configuration__mdt
             WHERE Id = :configurationId
             LIMIT 1
         ];
+        generateParserForRecord(recordItem);
+    }
+
+    // Custom metadata records can't be inserted via DML (even in tests), so the
+    // generation body is split out to accept an in-memory record. This lets unit
+    // tests exercise the Tooling API path with a constructed __mdt record.
+    @TestVisible
+    private static void generateParserForRecord(PromptToFlow_Configuration__mdt recordItem) {
         if (String.isBlank(recordItem.Parser_Class_Name__c)) {
             throw new AuraHandledException('Parser Class Name is required on the configuration record.');
         }
@@ -358,7 +403,8 @@ public with sharing class PromptToFlowController {
         return getParserGenerationSetupStatus();
     }
 
-    private static ConfigurationRecordDto toDto(PromptToFlow_Config__c recordItem) {
+    @TestVisible
+    private static ConfigurationRecordDto toDto(PromptToFlow_Configuration__mdt recordItem) {
         Set<String> existingClassNames = String.isBlank(recordItem.Parser_Class_Name__c)
             ? new Set<String>()
             : existingApexClassNames(new Set<String>{ recordItem.Parser_Class_Name__c });
@@ -368,12 +414,13 @@ public with sharing class PromptToFlowController {
     // Bulk-safe overload: callers that map many records pass a pre-computed set
     // of existing Apex class names so we don't issue one SOQL query per record.
     private static ConfigurationRecordDto toDto(
-        PromptToFlow_Config__c recordItem,
+        PromptToFlow_Configuration__mdt recordItem,
         Set<String> existingClassNames
     ) {
         ConfigurationRecordDto dto = new ConfigurationRecordDto();
         dto.id = recordItem.Id;
-        dto.name = recordItem.Name;
+        dto.developerName = recordItem.DeveloperName;
+        dto.name = recordItem.MasterLabel;
         dto.configurationJson = recordItem.Configuration_JSON__c;
         dto.templateJson = recordItem.Template_JSON__c;
         dto.invocableActionLabel = recordItem.Invocable_Action_Label__c;
@@ -383,7 +430,6 @@ public with sharing class PromptToFlowController {
         dto.parserClassNameLocked = !String.isBlank(recordItem.Parser_Class_Name__c)
             && existingClassNames.contains(recordItem.Parser_Class_Name__c);
         dto.generateParserOnSave = recordItem.Generate_Parser_On_Save__c;
-        dto.lastModifiedDate = recordItem.LastModifiedDate;
         return dto;
     }
 
@@ -848,5 +894,188 @@ public with sharing class PromptToFlowController {
 
     private static String getToolingApiBaseUrl() {
         return 'callout:' + TOOLING_NAMED_CREDENTIAL + '/services/data/v67.0/tooling';
+    }
+
+    // ---------------------------------------------------------------------
+    // Custom Metadata write helpers (SOAP Metadata API)
+    //
+    // Custom metadata records can't be created, updated, or deleted with DML.
+    // The Apex Metadata API (Metadata.Operations.enqueueDeployment) only does
+    // asynchronous upserts and can't delete records, so we call the synchronous
+    // SOAP Metadata API through the same Named Credential used for the Tooling
+    // API. The session is supplied via the {!$Credential.OAuthToken} merge field
+    // so the callout works from LWC/Aura contexts where UserInfo.getSessionId()
+    // is not API-enabled.
+    // ---------------------------------------------------------------------
+
+    private static final String METADATA_SOAP_NS = 'http://soap.sforce.com/2006/04/metadata';
+
+    // Builds a DeveloperName (<= 40 chars, valid API name, unique among existing
+    // config records) from a human-entered configuration name.
+    @TestVisible
+    private static String deriveUniqueDeveloperName(String configurationName) {
+        String base = configurationName == null ? '' : configurationName.trim();
+        base = base.replaceAll('[^A-Za-z0-9_]', '_').replaceAll('_+', '_');
+        while (base.startsWith('_')) {
+            base = base.substring(1);
+        }
+        if (String.isBlank(base) || !base.substring(0, 1).isAlpha()) {
+            base = 'Config_' + base;
+        }
+        // Leave room for a numeric uniqueness suffix (e.g. "_12").
+        Integer maxBase = MAX_CONFIG_NAME_LENGTH - 3;
+        if (base.length() > maxBase) {
+            base = base.substring(0, maxBase);
+        }
+        while (base.endsWith('_')) {
+            base = base.substring(0, base.length() - 1);
+        }
+        if (String.isBlank(base)) {
+            base = 'Config';
+        }
+
+        Set<String> taken = new Set<String>();
+        for (PromptToFlow_Configuration__mdt existing : [SELECT DeveloperName FROM PromptToFlow_Configuration__mdt]) {
+            taken.add(existing.DeveloperName.toLowerCase());
+        }
+
+        String candidate = base;
+        Integer suffix = 2;
+        while (taken.contains(candidate.toLowerCase())) {
+            candidate = base + '_' + suffix;
+            suffix++;
+        }
+        return candidate;
+    }
+
+    @TestVisible
+    private static void upsertConfigMetadata(String developerName, String label, Map<String, Object> fieldValues) {
+        String valuesXml = '';
+        for (String fieldName : fieldValues.keySet()) {
+            Object rawValue = fieldValues.get(fieldName);
+            String xsdType = (rawValue instanceof Boolean) ? 'xsd:boolean' : 'xsd:string';
+            String rendered = (rawValue == null) ? '' : xmlEscape(String.valueOf(rawValue));
+            valuesXml +=
+                '<met:values>' +
+                '<met:field>' + xmlEscape(fieldName) + '</met:field>' +
+                '<met:value xsi:type="' + xsdType + '">' + rendered + '</met:value>' +
+                '</met:values>';
+        }
+        String body =
+            '<met:upsertMetadata>' +
+            '<met:metadata xsi:type="met:CustomMetadata">' +
+            '<met:fullName>' + xmlEscape(CONFIG_MDT_FULLNAME_PREFIX + developerName) + '</met:fullName>' +
+            '<met:label>' + xmlEscape(label) + '</met:label>' +
+            valuesXml +
+            '</met:metadata>' +
+            '</met:upsertMetadata>';
+        checkSoapResult(sendMetadataSoap('upsertMetadata', body), 'Save configuration');
+    }
+
+    @TestVisible
+    private static void deleteConfigMetadata(List<String> fullNames) {
+        String namesXml = '';
+        for (String fullName : fullNames) {
+            namesXml += '<met:fullNames>' + xmlEscape(fullName) + '</met:fullNames>';
+        }
+        String body =
+            '<met:deleteMetadata>' +
+            '<met:type>CustomMetadata</met:type>' +
+            namesXml +
+            '</met:deleteMetadata>';
+        checkSoapResult(sendMetadataSoap('deleteMetadata', body), 'Delete configuration');
+    }
+
+    private static HttpResponse sendMetadataSoap(String soapAction, String bodyXml) {
+        String envelope =
+            '<?xml version="1.0" encoding="UTF-8"?>' +
+            '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"' +
+            ' xmlns:met="' + METADATA_SOAP_NS + '"' +
+            ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"' +
+            ' xmlns:xsd="http://www.w3.org/2001/XMLSchema">' +
+            '<soapenv:Header><met:SessionHeader>' +
+            '<met:sessionId>{!$Credential.OAuthToken}</met:sessionId>' +
+            '</met:SessionHeader></soapenv:Header>' +
+            '<soapenv:Body>' + bodyXml + '</soapenv:Body>' +
+            '</soapenv:Envelope>';
+
+        HttpRequest request = new HttpRequest();
+        request.setMethod('POST');
+        request.setEndpoint(getMetadataApiUrl());
+        request.setTimeout(120000);
+        request.setHeader('Content-Type', 'text/xml; charset=UTF-8');
+        request.setHeader('SOAPAction', soapAction);
+        request.setBody(envelope);
+        return new Http().send(request);
+    }
+
+    private static void checkSoapResult(HttpResponse response, String opLabel) {
+        Integer status = response.getStatusCode();
+        String body = response.getBody();
+        if (status == 401) {
+            throw new AuraHandledException(
+                opLabel + ' failed: the "' + TOOLING_NAMED_CREDENTIAL + '" Named Credential is not authenticated (401). ' +
+                'Open the PromptToFlow Setup tab and complete Authenticate, then try again.'
+            );
+        }
+        if (status >= 300) {
+            throw new AuraHandledException(opLabel + ' failed (status ' + status + '): ' + extractSoapError(body));
+        }
+        if (body != null && body.contains('<success>false')) {
+            throw new AuraHandledException(opLabel + ' failed: ' + extractSoapError(body));
+        }
+        if (body == null || !body.contains('<success>true')) {
+            throw new AuraHandledException(
+                opLabel + ' returned an unexpected response: ' + (body == null ? '(empty)' : body.abbreviate(500))
+            );
+        }
+    }
+
+    private static String extractSoapError(String body) {
+        if (String.isBlank(body)) {
+            return 'No response body returned.';
+        }
+        String fault = substringBetween(body, '<faultstring>', '</faultstring>');
+        if (fault != null) {
+            return fault;
+        }
+        String problem = substringBetween(body, '<problem>', '</problem>');
+        if (problem != null) {
+            return problem;
+        }
+        String message = substringBetween(body, '<message>', '</message>');
+        if (message != null) {
+            return message;
+        }
+        return body.abbreviate(500);
+    }
+
+    private static String substringBetween(String source, String startToken, String endToken) {
+        Integer startIndex = source.indexOf(startToken);
+        if (startIndex < 0) {
+            return null;
+        }
+        Integer valueStart = startIndex + startToken.length();
+        Integer endIndex = source.indexOf(endToken, valueStart);
+        if (endIndex < 0) {
+            return null;
+        }
+        return source.substring(valueStart, endIndex).trim();
+    }
+
+    private static String xmlEscape(String value) {
+        if (value == null) {
+            return '';
+        }
+        return value
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('"', '&quot;')
+            .replace('\'', '&apos;');
+    }
+
+    private static String getMetadataApiUrl() {
+        return 'callout:' + TOOLING_NAMED_CREDENTIAL + '/services/Soap/m/60.0';
     }
 }

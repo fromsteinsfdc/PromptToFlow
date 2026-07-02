@@ -20,31 +20,6 @@
         <enabled>true</enabled>
         <flow>PromptToFlow_JSON_Template_Retriever</flow>
     </flowAccesses>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>PromptToFlow_Config__c.Configuration_JSON__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>PromptToFlow_Config__c.Generate_Parser_On_Save__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>PromptToFlow_Config__c.Invocable_Action_Label__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>PromptToFlow_Config__c.Parser_Class_Name__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
-    <fieldPermissions>
-        <editable>true</editable>
-        <field>PromptToFlow_Config__c.Template_JSON__c</field>
-        <readable>true</readable>
-    </fieldPermissions>
     <hasActivationRequired>false</hasActivationRequired>
     <label>PromptToFlow User</label>
     <pageAccesses>
@@ -59,14 +34,4 @@
         <tab>PromptToFlow_Setup</tab>
         <visibility>Visible</visibility>
     </tabSettings>
-    <objectPermissions>
-        <allowCreate>true</allowCreate>
-        <allowDelete>true</allowDelete>
-        <allowEdit>true</allowEdit>
-        <allowRead>true</allowRead>
-        <modifyAllRecords>false</modifyAllRecords>
-        <object>PromptToFlow_Config__c</object>
-        <viewAllFields>false</viewAllFields>
-        <viewAllRecords>false</viewAllRecords>
-    </objectPermissions>
 </PermissionSet>

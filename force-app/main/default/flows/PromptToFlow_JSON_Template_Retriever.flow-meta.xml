@@ -148,14 +148,14 @@
         </connector>
         <filterLogic>and</filterLogic>
         <filters>
-            <field>Name</field>
+            <field>MasterLabel</field>
             <operator>EqualTo</operator>
             <value>
                 <elementReference>configRecordName</elementReference>
             </value>
         </filters>
         <getFirstRecordOnly>true</getFirstRecordOnly>
-        <object>PromptToFlow_Config__c</object>
+        <object>PromptToFlow_Configuration__mdt</object>
         <storeOutputAutomatically>true</storeOutputAutomatically>
     </recordLookups>
     <start>
@@ -182,6 +182,6 @@
         <isCollection>false</isCollection>
         <isInput>true</isInput>
         <isOutput>false</isOutput>
-        <objectType>PromptToFlow_Config__c</objectType>
+        <objectType>PromptToFlow_Configuration__mdt</objectType>
     </variables>
 </Flow>

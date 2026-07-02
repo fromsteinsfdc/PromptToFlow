@@ -1,5 +1,15 @@
 # Design Notes
 
+## Decision: Store configurations as Custom Metadata (CMDT)
+
+- Date: 2026-07-02
+- Context: Builder configurations were stored in the `PromptToFlow_Config__c` custom object. Because the app is built in sandboxes and promoted to production, configurations should travel as metadata rather than data.
+- Decision: Replaced the custom object with the `PromptToFlow_Configuration__mdt` custom metadata type. A distinct base name (`PromptToFlow_Configuration`, not `PromptToFlow_Config`) is used deliberately so it never collides with the legacy `PromptToFlow_Config__c` object during an upgrade (a custom object and CMDT cannot share a base API name).
+- Reads: SOQL against `__mdt` (never `getAll()`/`getInstance()`, which truncate the LongTextArea JSON fields at 255 chars). Note `__mdt` does not expose `LastModifiedDate`, so lists are ordered by `MasterLabel`.
+- Writes: custom metadata records cannot be written with DML. The Apex Metadata API (`Metadata.Operations.enqueueDeployment`) is async and cannot delete records, so save/delete use the **synchronous SOAP Metadata API** (`upsertMetadata` / `deleteMetadata`) through the existing `PromptToFlow_Tooling` Named Credential, authenticated via the `{!$Credential.OAuthToken}` merge field.
+- Consequence: saving/deleting a configuration now requires the Named Credential setup ("Run Setup → Authenticate") that previously was only needed for parser generation. Configuration names are capped at 40 characters (CMDT `MasterLabel`/`DeveloperName` limit).
+- Testability: CMDT records can't be inserted via DML even in tests, so the callout-heavy paths are exercised through `@TestVisible` seams with in-memory `__mdt` records and `HttpCalloutMock`. The live SOAP save/delete cannot be end-to-end verified in an automated test or without completing the manual Named Credential OAuth step.
+
 ## Deferred Decision: Parser Versioning Strategy
 
 - Date: 2026-06-28

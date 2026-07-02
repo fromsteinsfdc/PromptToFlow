@@ -3,7 +3,7 @@
     <fullName>Generate_Parser_On_Save__c</fullName>
     <defaultValue>false</defaultValue>
     <externalId>false</externalId>
+    <fieldManageability>DeveloperControlled</fieldManageability>
     <label>Generate Parser On Save</label>
-    <required>false</required>
     <type>Checkbox</type>
 </CustomField>
