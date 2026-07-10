@@ -12,10 +12,8 @@ PromptToFlow lets a Salesforce admin turn the JSON output of a prompt template i
 ## Install & set up
 
 - **Install the package** using the link above; install for **Admins Only** (or All Users) when prompted.
-- **Assign the permission set** `PromptToFlow_User` to yourself and anyone who will use the builder. (The builder can also do this for you via its **Auto-assign setup permission set** button.)
-- **Open the `PromptToFlow Setup` tab** and click **Run Setup**. This automatically creates the per‑org OAuth client and wires the Auth Provider, External Credential, and Named Credential — there are no keys or secrets to copy.
-- **Authenticate once:** from the setup page, open **External Credentials**, and on the `PromptToFlow_Principal` click **Authenticate** to complete the one‑time OAuth handshake.
-- Click **Re-check Status** until the page reports that PromptToFlow is fully configured.
+- **Open the `PromptToFlow Setup` tab** and click **Run Setup**. This automatically assigns the included Permission Set and creates the per‑org OAuth client and wires the Auth Provider, External Credential, and Named Credential — there are no keys or secrets to copy.
+- **Authenticate once:** Also on the `PromptToFlow Setup` page, click **Open External Credentials** and on the `PromptToFlow_Principal` click **Authenticate** to complete the one‑time OAuth handshake.
 
 ## Using the app
 
