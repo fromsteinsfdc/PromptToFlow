@@ -1,22 +1,32 @@
-# Salesforce DX Project: Next Steps
+# PromptToFlow
 
-Now that you’ve created a Salesforce DX project, what’s next? Here are some documentation resources to get you started.
+PromptToFlow lets a Salesforce admin turn the JSON output of a prompt template into native, typed Salesforce records and fields that a Flow can act on — no code required.
 
-## How Do You Plan to Deploy Your Changes?
+## Key resources
 
-Do you want to deploy a set of changes, or create a self-contained application? Choose a [development model](https://developer.salesforce.com/tools/vscode/en/user-guide/development-models).
+- **Demo video:** [Prompt To Flow demo v1](https://salesforce.vidyard.com/watch/ayhXodKBFStR8PYgSkM3VZ)
+- **Install the latest version (0.1.1-3):**
+  - Production / Developer Edition: [Install PromptToFlow](https://login.salesforce.com/packaging/installPackage.apexp?p0=04tfj000000LvXxAAK)
+  - Sandbox: [Install PromptToFlow](https://test.salesforce.com/packaging/installPackage.apexp?p0=04tfj000000LvXxAAK)
 
-## Configure Your Salesforce DX Project
+## Install & set up
 
-The `sfdx-project.json` file contains useful configuration information for your project. See [Salesforce DX Project Configuration](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_ws_config.htm) in the _Salesforce DX Developer Guide_ for details about this file.
+- **Install the package** using the link above; install for **Admins Only** (or All Users) when prompted.
+- **Assign the permission set** `PromptToFlow_User` to yourself and anyone who will use the builder. (The builder can also do this for you via its **Auto-assign setup permission set** button.)
+- **Open the `PromptToFlow Setup` tab** and click **Run Setup**. This automatically creates the per‑org OAuth client and wires the Auth Provider, External Credential, and Named Credential — there are no keys or secrets to copy.
+- **Authenticate once:** from the setup page, open **External Credentials**, and on the `PromptToFlow_Principal` click **Authenticate** to complete the one‑time OAuth handshake.
+- Click **Re-check Status** until the page reports that PromptToFlow is fully configured.
 
-## Read All About It
+## Using the app
 
-- [Salesforce Extensions Documentation](https://developer.salesforce.com/tools/vscode/)
-- [Salesforce CLI Setup Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_setup.meta/sfdx_setup/sfdx_setup_intro.htm)
-- [Salesforce DX Developer Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_intro.htm)
-- [Salesforce CLI Command Reference](https://developer.salesforce.com/docs/atlas.en-us.sfdx_cli_reference.meta/sfdx_cli_reference/cli_reference.htm)
+- **Open the builder:** go to the **`PromptToFlow Builder`** tab (the *JSON Template Builder*).
+- **Name the configuration:** enter a **Configuration Name** and an **Invocable Action Label** (40 characters max — this label also becomes the generated Apex parser class name and the Flow action you'll call).
+- **Add objects and fields:** click **+** to add each object the response should contain, pick the object, toggle **Collection (array)** if it should return multiple records, and choose the fields to include.
+- **Preview & copy:** expand the preview to review the generated JSON, and use **Copy Output** to grab the template.
+- **Save:** click **Save** to store the configuration (as Custom Metadata) and generate its Apex parser invocable action. Saving requires the setup steps above to be complete.
+- **Feed the template into your prompt:** in your Prompt Template, add the **`PromptToFlow JSON Template Retriever`** flow and pass it the configuration (by Name or record). It injects your JSON template into the prompt instructions so the model returns output in exactly that shape.
+- **Parse the response in a Flow:** in your Flow, call the generated invocable action (named by your **Invocable Action Label**) to parse the prompt's JSON response into the typed sObjects and collections your Flow can then use.
 
-## Project-Specific Guides
+---
 
-- `AUTH_PACKAGING_2GP.md` - managed-package auth and one-time setup guidance for this project
+For internal design and packaging details, see `DESIGN_NOTES.md` and `AUTH_PACKAGING_2GP.md`.
