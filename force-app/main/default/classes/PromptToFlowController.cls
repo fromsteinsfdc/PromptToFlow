@@ -120,6 +120,7 @@ public with sharing class PromptToFlowController {
         return objectName.endsWith('Share')
             || objectName.endsWith('History')
             || objectName.endsWith('Feed')
+            || objectName.endsWith('Tag')
             || objectName.endsWith('ChangeEvent');
     }
 

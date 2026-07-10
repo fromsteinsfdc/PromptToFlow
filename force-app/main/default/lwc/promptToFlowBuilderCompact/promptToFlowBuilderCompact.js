@@ -641,10 +641,37 @@ export default class PromptToFlowBuilderCompact extends LightningElement {
             return;
         }
         try {
-            await navigator.clipboard.writeText(this.jsonOutput);
+            await this.copyToClipboard(this.jsonOutput);
             this.showToast('Copied', 'JSON template copied to clipboard.', 'success');
         } catch (error) {
             this.showError('Unable to copy output', error);
+        }
+    }
+
+    async copyToClipboard(text) {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+        // Fallback for contexts where navigator.clipboard is unavailable
+        // (e.g. non-secure contexts or restricted Lightning environments).
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.top = '-9999px';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        let successful = false;
+        try {
+            successful = document.execCommand('copy');
+        } finally {
+            document.body.removeChild(textarea);
+        }
+        if (!successful) {
+            throw new Error('Copy command was unsuccessful.');
         }
     }
 
